@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MathPad II</title>
+<meta name="description" content="CAS-Grafikrechner im Stil des ClassPad II. Eine Datei, läuft offline in jedem Browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='1' width='20' height='30' rx='4' fill='%2317191c' stroke='%231f7fd6' stroke-width='2'/%3E%3Crect x='9' y='4' width='14' height='12' fill='%23fff'/%3E%3Cpath d='M10 13c2-6 4-6 6-2s3 3 6-4' fill='none' stroke='%231a4fd8' stroke-width='1.4'/%3E%3C/svg%3E">
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="name">MathPad II</span>
+  <span class="sub">CAS-Grafikrechner im Stil des ClassPad II · offline</span>
+  <span class="sp"></span>
+  <button type="button" class="tb-btn" id="btn-land" aria-pressed="false" title="Rotate: Bildschirm quer, Tasten daneben">Quer</button>
+  <button type="button" class="tb-btn" id="btn-help" aria-pressed="false">Tastatur-Hilfe</button>
+</header>
+<main id="stage">
+  <div id="fit"><div id="device"></div></div>
+  <aside id="help" class="help" hidden>
+    <h2>Mit der Mac-Tastatur</h2>
+    <table>
+      <tr><td><kbd>Enter</kbd></td><td>EXE (ausrechnen)</td></tr>
+      <tr><td><kbd>⇧</kbd> <kbd>Enter</kbd></td><td>Dezimal ausrechnen (≈)</td></tr>
+      <tr><td><kbd>/</kbd></td><td>Bruch (Zähler wird übernommen)</td></tr>
+      <tr><td><kbd>^</kbd></td><td>Potenz / Exponent</td></tr>
+      <tr><td><kbd>*</kbd></td><td>Mal</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Cursor, Felder in Vorlagen, frühere Zeilen</td></tr>
+      <tr><td><kbd>⌫</kbd> / <kbd>⌥</kbd><kbd>⌫</kbd></td><td>Zeichen löschen / ganze Zeile</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Menü, Dialog oder Trace schließen</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>Fenster wechseln (Editor ↔ Graph)</td></tr>
+      <tr><td><kbd>⌘</kbd><kbd>C</kbd> / <kbd>⌘</kbd><kbd>V</kbd></td><td>Eingabe kopieren / Text einfügen</td></tr>
+      <tr><td>sqrt( · pi · ans</td><td>werden automatisch zu √, π, ans</td></tr>
+      <tr><td>sin( cos( ln( …</td><td>Funktionsnamen einfach tippen</td></tr>
+      <tr><td>define f(x)=x^2</td><td>Leertaste nach „define“ macht daraus den Befehl Define</td></tr>
+    </table>
+    <h2 style="margin-top:12px">Am Gerät</h2>
+    <table>
+      <tr><td>Keyboard</td><td>Soft-Tastatur: Math1, Math2 (∫, d/dx, lim, Σ, Matrizen), Trig, Var, abc</td></tr>
+      <tr><td>Shift +</td><td>( → {  · ) → }  · , → ⇒  · = → ≠  · 0 → π  · . → i  · EXP → e  · ^ → √  · ÷ → Bruch  · (−) → ans  · EXE → ≈  · ← → Entf  · Clear → Aus</td></tr>
+      <tr><td>Statusleiste</td><td>Standard/Decimal, Real/Cplx, Rad/Deg/Gra antippen zum Umschalten</td></tr>
+      <tr><td>Ergebnis antippen</td><td>übernimmt es in die Eingabe</td></tr>
+      <tr><td>alte Eingabe antippen</td><td>bearbeiten und neu ausrechnen</td></tr>
+      <tr><td>Graph</td><td>ziehen = verschieben, Trackpad/Mausrad = zoomen</td></tr>
+    </table>
+    <p>Alles bleibt in diesem Browser gespeichert (Verlauf, Funktionen, Listen, Einstellungen). Zurücksetzen: Menu → System.</p>
+  </aside>
+</main>
+<script>
+/* nerdamer-prime 1.5.0 (MIT, © together-science) mit big-integer (Public Domain) und decimal.js (MIT, © Michael Mclaughlin) */
+/*__NERDAMER__*/
+</script>
+<script>
+/*__APP__*/
+</script>
+<script>
+MP.App.init();
+</script>
+</body>
+</html>
