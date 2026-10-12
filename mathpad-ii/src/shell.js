@@ -712,6 +712,13 @@
   };
   function applyRotation() {
     document.getElementById('device').classList.toggle('land', App.land);
+    const seg = document.getElementById('orient-seg');
+    if (seg) seg.querySelectorAll('button').forEach((b, i) => {
+      const on = (b.dataset.orient === 'land') === App.land;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on) { seg.style.setProperty('--i', i); seg.dataset.i = i; }
+    });
   }
   // iPhone und iPad: das Geraet folgt dem Drehen in der Hand (am Mac bleibt es beim Rotate-Knopf)
   const mqTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
@@ -758,23 +765,26 @@
     App.save();
   };
   function bindChrome() {
-    const seg = document.getElementById('theme-seg');
-    if (seg) {
+    // Segmented Controls (Radiogruppen): Klick und Pfeiltasten wie bei macOS
+    const bindSeg = (id, key, cur, set) => {
+      const seg = document.getElementById(id);
+      if (!seg) return;
       const btns = Array.from(seg.querySelectorAll('button'));
-      btns.forEach(b => b.addEventListener('click', () => App.setTheme(b.dataset.pref, true)));
-      // Radiogruppe: Pfeiltasten wechseln wie bei macOS
+      btns.forEach(b => b.addEventListener('click', () => set(b.dataset[key])));
       seg.addEventListener('keydown', e => {
-        const i = btns.findIndex(b => b.dataset.pref === App.themePref);
+        const i = btns.findIndex(b => b.dataset[key] === cur());
         let n = -1;
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') n = (i + 1) % btns.length;
         else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') n = (i + btns.length - 1) % btns.length;
         if (n < 0) return;
         e.preventDefault();
         e.stopPropagation();
-        App.setTheme(btns[n].dataset.pref, true);
+        set(btns[n].dataset[key]);
         btns[n].focus();
       });
-    }
+    };
+    bindSeg('theme-seg', 'pref', () => App.themePref, p => App.setTheme(p, true));
+    bindSeg('orient-seg', 'orient', () => (App.land ? 'land' : 'portrait'), o => { if ((o === 'land') !== App.land) App.rotate(true); });
     if (mqLight) {
       const onSys = () => { if (App.themePref === 'auto') { const r = document.documentElement; r.classList.add('theme-anim'); paintTheme(); setTimeout(() => r.classList.remove('theme-anim'), 420); } };
       if (mqLight.addEventListener) mqLight.addEventListener('change', onSys); else if (mqLight.addListener) mqLight.addListener(onSys);

@@ -32,7 +32,7 @@ Das App-Menü hat alle 15 Apps des ClassPad II in der Original-Reihenfolge.
 Gerät: Gehäuse im Hochformat mit den Proportionen des fx-CP400 (89 × 206 mm, LCD 320 × 528 Pixel),
 Hardware-Tasten inkl. Shift-Ebene, Icon-Leiste (Settings, Menu, Main, Resize, Swap, Rotate, Esc),
 Soft-Keyboard (Math1, Math2, Trig, Var, abc), Statusleiste zum Antippen, Aus/An über Shift+Clear.
-Rotate schaltet auf ein echtes Querformat-Gerät: breites Gehäuse, Display (528 × 320) links, Tastenfeld
+Ausrichtung wählen: oben in der Titelleiste **Hoch · Quer** oder am Gerät das Rotate-Symbol. Querformat ist ein echtes Querformat-Gerät: breites Gehäuse, Display (528 × 320) links, Tastenfeld
 rechts daneben, alle Beschriftungen aufrecht. Auf iPhone und iPad folgt das Gerät automatisch dem Drehen in
 der Hand. Alles wird im Browser gespeichert (localStorage).
 
@@ -42,7 +42,7 @@ Oben in der Titelleiste: **Hell · Dunkel · Auto** als Segmented Control wie in
 Standard; Auto folgt der Systemeinstellung, auch live. Bildschirm, Menüs, Dialoge, Soft-Keyboard,
 Tabellen und alle Grafiken wechseln mit (Apple-Systemfarben, SF-Schrift, Glas-Effekte, iOS-Icons im
 App-Menü). Das Gehäuse ist Hardware und bleibt gleich. Die Wahl wird gespeichert und schon vor dem
-ersten Bild gesetzt, nichts blitzt auf. Daneben: Zoom (−, Fit, +) und die Tastatur-Hilfe als Popover.
+ersten Bild gesetzt, nichts blitzt auf. Daneben: Hoch · Quer, Zoom (−, Fit, +) und die Tastatur-Hilfe als Popover.
 
 ## Mac-Tastatur
 
@@ -62,7 +62,7 @@ ersten Bild gesetzt, nichts blitzt auf. Daneben: Zoom (−, Fit, +) und die Tast
 npm install          # nerdamer-prime 1.5.0
 npm run build        # baut dist/MathPad-II.html (eine Datei, alles eingebettet)
 npm test             # 106 Rechenkern-Tests in Node
-npm run test:e2e     # 77 Browser-Prüfungen mit Playwright (Chromium)
+npm run test:e2e     # 80 Browser-Prüfungen mit Playwright (Chromium)
 ```
 
 Aufbau (`src/`):

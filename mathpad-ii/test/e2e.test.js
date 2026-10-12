@@ -257,6 +257,13 @@ async function run(viewport, fn) {
     await page.emulateMedia({ colorScheme: 'dark' }); await page.waitForTimeout(600);
     ok('Auto folgt System live → dunkel', (await theme())[0] === 'dark', await theme());
     await page.click('#theme-seg [data-pref="dark"]'); await page.waitForTimeout(600);
+    // Ausrichtung über die Titelleiste
+    await page.click('#orient-seg [data-orient="land"]'); await page.waitForTimeout(600);
+    ok('Titelleiste: Quer', await page.evaluate(() => MP.App.land && document.querySelector('#orient-seg [data-orient="land"]').getAttribute('aria-checked') === 'true'));
+    await page.click('.ipanel [data-icon="rotate"]'); await page.waitForTimeout(600);
+    ok('Rotate-Icon synchronisiert die Titelleiste', await page.evaluate(() => !MP.App.land && document.querySelector('#orient-seg [data-orient="portrait"]').getAttribute('aria-checked') === 'true'));
+    await page.click('#orient-seg [data-orient="portrait"]'); await page.waitForTimeout(300);
+    ok('Hoch bleibt Hoch', !(await page.evaluate(() => MP.App.land)));
     // Hilfe-Popover
     await page.click('#btn-help');
     ok('Hilfe offen', !(await page.$eval('#help', e => e.hidden)));

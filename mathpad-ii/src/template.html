@@ -33,6 +33,11 @@
     <button type="button" role="radio" data-pref="auto" aria-checked="false" tabindex="-1" title="Automatisch wie das System"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg><span>Auto</span></button>
   </div>
   <div class="tools">
+    <div class="seg two" id="orient-seg" role="radiogroup" aria-label="Ausrichtung" style="--n:2;--i:0" data-i="0">
+      <span class="thumb" aria-hidden="true"></span>
+      <button type="button" role="radio" data-orient="portrait" aria-checked="true" tabindex="0" title="Hochformat"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.8"/><path d="M7 12.2h2"/></svg><span>Hoch</span></button>
+      <button type="button" role="radio" data-orient="land" aria-checked="false" tabindex="-1" title="Querformat"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="13" height="7" rx="1.8"/><path d="M12.2 7v2"/></svg><span>Quer</span></button>
+    </div>
     <div class="pill" role="group" aria-label="Zoom">
       <button type="button" id="zoom-out" title="Kleiner" aria-label="Kleiner"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
       <button type="button" id="zoom-fit" class="zv" title="An Fenster anpassen"><span id="zoom-val">Fit</span></button>
@@ -66,6 +71,7 @@
       <tr><td>Ergebnis antippen</td><td>übernimmt es in die Eingabe</td></tr>
       <tr><td>alte Eingabe antippen</td><td>bearbeiten und neu ausrechnen</td></tr>
       <tr><td>Graph</td><td>ziehen = verschieben, Trackpad/Mausrad = zoomen</td></tr>
+      <tr><td>Hoch · Quer</td><td>Ausrichtung oben in der Titelleiste (oder Rotate am Gerät); iPhone und iPad drehen automatisch mit</td></tr>
       <tr><td>Hell · Dunkel · Auto</td><td>Erscheinungsbild oben in der Titelleiste, Auto folgt macOS</td></tr>
     </table>
     <p>Alles bleibt in diesem Browser gespeichert (Verlauf, Funktionen, Listen, Einstellungen). Zurücksetzen: Menu → System.</p>

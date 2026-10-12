@@ -195,6 +195,7 @@ button { font: inherit; color: inherit; }
 .seg[data-i="0"] button:nth-of-type(1)::before, .seg[data-i="0"] button:nth-of-type(2)::before,
 .seg[data-i="1"] button:nth-of-type(2)::before, .seg[data-i="1"] button:nth-of-type(3)::before,
 .seg[data-i="2"] button:nth-of-type(3)::before { opacity: 0; }
+.seg.two button::before { opacity: 0; }
 
 .pill { display: inline-flex; align-items: center; border-radius: 9px; background: var(--ctl); padding: 2px; }
 .pill button { border: 0; background: none; cursor: pointer; height: 24px; min-width: 28px; padding: 0 8px; border-radius: 7px; font-size: 13px; color: var(--page-ink); display: flex; align-items: center; justify-content: center; }
@@ -630,6 +631,11 @@ button { font: inherit; color: inherit; }
     <button type="button" role="radio" data-pref="auto" aria-checked="false" tabindex="-1" title="Automatisch wie das System"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg><span>Auto</span></button>
   </div>
   <div class="tools">
+    <div class="seg two" id="orient-seg" role="radiogroup" aria-label="Ausrichtung" style="--n:2;--i:0" data-i="0">
+      <span class="thumb" aria-hidden="true"></span>
+      <button type="button" role="radio" data-orient="portrait" aria-checked="true" tabindex="0" title="Hochformat"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="1.5" width="7" height="13" rx="1.8"/><path d="M7 12.2h2"/></svg><span>Hoch</span></button>
+      <button type="button" role="radio" data-orient="land" aria-checked="false" tabindex="-1" title="Querformat"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="13" height="7" rx="1.8"/><path d="M12.2 7v2"/></svg><span>Quer</span></button>
+    </div>
     <div class="pill" role="group" aria-label="Zoom">
       <button type="button" id="zoom-out" title="Kleiner" aria-label="Kleiner"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
       <button type="button" id="zoom-fit" class="zv" title="An Fenster anpassen"><span id="zoom-val">Fit</span></button>
@@ -663,6 +669,7 @@ button { font: inherit; color: inherit; }
       <tr><td>Ergebnis antippen</td><td>übernimmt es in die Eingabe</td></tr>
       <tr><td>alte Eingabe antippen</td><td>bearbeiten und neu ausrechnen</td></tr>
       <tr><td>Graph</td><td>ziehen = verschieben, Trackpad/Mausrad = zoomen</td></tr>
+      <tr><td>Hoch · Quer</td><td>Ausrichtung oben in der Titelleiste (oder Rotate am Gerät); iPhone und iPad drehen automatisch mit</td></tr>
       <tr><td>Hell · Dunkel · Auto</td><td>Erscheinungsbild oben in der Titelleiste, Auto folgt macOS</td></tr>
     </table>
     <p>Alles bleibt in diesem Browser gespeichert (Verlauf, Funktionen, Listen, Einstellungen). Zurücksetzen: Menu → System.</p>
@@ -4551,6 +4558,13 @@ decimal.js/decimal.js:
   };
   function applyRotation() {
     document.getElementById('device').classList.toggle('land', App.land);
+    const seg = document.getElementById('orient-seg');
+    if (seg) seg.querySelectorAll('button').forEach((b, i) => {
+      const on = (b.dataset.orient === 'land') === App.land;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on) { seg.style.setProperty('--i', i); seg.dataset.i = i; }
+    });
   }
   // iPhone und iPad: das Geraet folgt dem Drehen in der Hand (am Mac bleibt es beim Rotate-Knopf)
   const mqTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
@@ -4597,23 +4611,26 @@ decimal.js/decimal.js:
     App.save();
   };
   function bindChrome() {
-    const seg = document.getElementById('theme-seg');
-    if (seg) {
+    // Segmented Controls (Radiogruppen): Klick und Pfeiltasten wie bei macOS
+    const bindSeg = (id, key, cur, set) => {
+      const seg = document.getElementById(id);
+      if (!seg) return;
       const btns = Array.from(seg.querySelectorAll('button'));
-      btns.forEach(b => b.addEventListener('click', () => App.setTheme(b.dataset.pref, true)));
-      // Radiogruppe: Pfeiltasten wechseln wie bei macOS
+      btns.forEach(b => b.addEventListener('click', () => set(b.dataset[key])));
       seg.addEventListener('keydown', e => {
-        const i = btns.findIndex(b => b.dataset.pref === App.themePref);
+        const i = btns.findIndex(b => b.dataset[key] === cur());
         let n = -1;
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') n = (i + 1) % btns.length;
         else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') n = (i + btns.length - 1) % btns.length;
         if (n < 0) return;
         e.preventDefault();
         e.stopPropagation();
-        App.setTheme(btns[n].dataset.pref, true);
+        set(btns[n].dataset[key]);
         btns[n].focus();
       });
-    }
+    };
+    bindSeg('theme-seg', 'pref', () => App.themePref, p => App.setTheme(p, true));
+    bindSeg('orient-seg', 'orient', () => (App.land ? 'land' : 'portrait'), o => { if ((o === 'land') !== App.land) App.rotate(true); });
     if (mqLight) {
       const onSys = () => { if (App.themePref === 'auto') { const r = document.documentElement; r.classList.add('theme-anim'); paintTheme(); setTimeout(() => r.classList.remove('theme-anim'), 420); } };
       if (mqLight.addEventListener) mqLight.addEventListener('change', onSys); else if (mqLight.addListener) mqLight.addListener(onSys);
