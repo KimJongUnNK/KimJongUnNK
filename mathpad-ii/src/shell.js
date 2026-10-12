@@ -65,6 +65,17 @@
     h, svg, A, applyInsert, mathLabel
   };
   App.env = { settings: App.settings, vars: {}, fns: {}, userFns: new Set(), ans: null };
+
+  /* ---------- Farbschema: Dunkel (Standard), Hell, Auto — Apple-Systemfarben ---------- */
+  App.theme = 'dark';
+  App.themePref = 'dark';
+  const PAL = {
+    light: { bg: '#ffffff', ink: '#1d1d1f', grid: '#e5e5ea', axis: '#3a3a3c', label: '#6e6e73', mute: '#8e8e93', sel: '#007aff', shade: 'rgba(0,122,255,.17)', hist: 'rgba(0,122,255,.24)',
+      curves: ['#007aff', '#ff3b30', '#34c759', '#af52de', '#1d1d1f', '#32ade6', '#ff9500', '#5856d6'] },
+    dark: { bg: '#000000', ink: '#f5f5f7', grid: '#1f1f22', axis: '#8e8e93', label: '#98989d', mute: '#8e8e93', sel: '#0a84ff', shade: 'rgba(10,132,255,.28)', hist: 'rgba(10,132,255,.36)',
+      curves: ['#0a84ff', '#ff453a', '#30d158', '#bf5af2', '#f5f5f7', '#64d2ff', '#ff9f0a', '#7d7aff'] }
+  };
+  App.pal = () => PAL[App.theme] || PAL.dark;
   MP.userFns = App.env.userFns;
 
   /* ---------- Speichern ---------- */
@@ -78,7 +89,7 @@
     {
       try {
         const data = {
-          v: 1, settings: App.settings, cur: App.curName, land: App.land, kbTab: App.kbTab,
+          v: 1, settings: App.settings, cur: App.curName, land: App.land, zoom: App.zoom, kbTab: App.kbTab, theme: App.themePref,
           vars: App.env.vars, fns: App.env.fns, ans: App.env.ans,
           apps: {}
         };
@@ -97,7 +108,7 @@
     } catch (e) { return null; }
   }
   App.resetAll = function () {
-    try { localStorage.removeItem(STORE_KEY); } catch (e) { /* egal */ }
+    try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(THEME_KEY); } catch (e) { /* egal */ }
     location.reload();
   };
 
@@ -129,8 +140,7 @@
       b.addEventListener('click', () => iconPress(k));
       ip.appendChild(b);
     });
-    const face = h('div', { class: 'face' }, h('div', { class: 'screen-wrap' }, screen), ip);
-    dev.append(h('div', { class: 'dev-top' }, h('span', { class: 'dev-logo', text: 'MATHPAD' }), h('span', { class: 'dev-model', text: 'II' })), face, buildKeys());
+    dev.append(h('div', { class: 'dev-logo', text: 'MATHPAD' }), h('div', { class: 'glass' }), h('div', { class: 'screen-wrap' }, screen), ip, buildKeys());
   }
 
   /* ---------- Hardware-Tasten ---------- */
@@ -172,9 +182,11 @@
   }
   function buildKeys() {
     const dp = h('div', { class: 'dpad' });
+    // Gedrehtes Geraet: die Pfeile zeigen in die neue Richtung, also umsetzen (wie am ClassPad)
+    const ROT = { UP: 'LEFT', LEFT: 'DOWN', DOWN: 'RIGHT', RIGHT: 'UP' };
     [['up', 'UP', '▲'], ['dn', 'DOWN', '▼'], ['lf', 'LEFT', '◀'], ['rt', 'RIGHT', '▶']].forEach(([c, k, t]) => {
       const b = h('button', { type: 'button', class: c, 'data-k': k, 'aria-label': k.toLowerCase(), text: t });
-      bindPress(b, () => press(k));
+      bindPress(b, () => press(App.land ? ROT[k] : k));
       keyEls[k] = b;
       dp.appendChild(b);
     });
@@ -286,7 +298,7 @@
   function settingsMenu() {
     const el = document.querySelector('.ipanel [data-icon="settings"]');
     const r = el.getBoundingClientRect(), sr = document.getElementById('screen').getBoundingClientRect();
-    openMenu(App.setupItems(), { x: (r.left - sr.left) / App.scale, y: 528 - 4, up: true });
+    openMenu(App.setupItems(), App.land ? { x: 4, y: 316, up: true } : { x: (r.left - sr.left) / App.scale, y: 524, up: true });
   }
 
   /* ---------- Menues ---------- */
@@ -336,7 +348,7 @@
     const bar = document.getElementById('menubar');
     bar.textContent = '';
     const defs = App.cur.menus ? App.cur.menus() : [];
-    const gear = h('button', { type: 'button', class: 'gear', 'aria-label': 'Einstellungen', html: svg('<circle cx="10" cy="10" r="3"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3M4 4l2.1 2.1M13.9 13.9L16 16M4 16l2.1-2.1M13.9 6.1L16 4"/>') });
+    const gear = h('button', { type: 'button', class: 'gear', 'aria-label': 'Einstellungen', html: svg('<circle cx="10" cy="10" r="3"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3M4 4l2.1 2.1M13.9 13.9L16 16M4 16l2.1-2.1M13.9 6.1L16 4"/>') + '<span class="tri">▼</span>' });
     gear.addEventListener('click', e => { e.stopPropagation(); toggleBarMenu(gear, App.setupItems()); });
     bar.appendChild(gear);
     defs.forEach(d => {
@@ -355,10 +367,25 @@
     openMenu(items, { x: (r.left - sr.left) / App.scale, y: (r.bottom - sr.top) / App.scale });
   }
 
+  let tbPage = 0, tbFor = null;
   function renderToolbar() {
     const tb = document.getElementById('toolbar');
     tb.textContent = '';
-    const defs = App.cur.toolbar ? App.cur.toolbar() : [];
+    let defs = App.cur.toolbar ? App.cur.toolbar() : [];
+    if (tbFor !== App.curName) { tbPage = 0; tbFor = App.curName; }
+    // Platz: 320 px (quer 528 px) abzueglich Pfeil; Knoepfe sind 30-44 px breit
+    const W = App.land ? 520 : 312;
+    const width = d => (d.label && !d.icon && !d.math ? Math.max(30, d.label.length * 6.4 + 8) : 30) + 1;
+    const pages = [];
+    let cur = [], used = 0;
+    defs.forEach(d => {
+      const w = width(d);
+      if (cur.length && used + w > W - 18) { pages.push(cur); cur = []; used = 0; }
+      cur.push(d); used += w;
+    });
+    if (cur.length) pages.push(cur);
+    if (tbPage >= pages.length) tbPage = 0;
+    defs = pages[tbPage] || [];
     defs.forEach(d => {
       const b = h('button', { type: 'button', title: d.title || d.label || '', 'aria-label': d.title || d.label, class: d.on ? 'on' : null });
       if (d.icon) b.innerHTML = d.icon; else if (d.math) b.appendChild(mathLabel(d.math)); else b.textContent = d.label;
@@ -375,6 +402,11 @@
       });
       tb.appendChild(b);
     });
+    if (pages.length > 1) {
+      const more = h('button', { type: 'button', class: 'tb-more', title: 'Weitere Symbole', 'aria-label': 'Weitere Symbole', text: '▶' });
+      more.addEventListener('click', e => { e.stopPropagation(); tbPage = (tbPage + 1) % pages.length; renderToolbar(); });
+      tb.appendChild(more);
+    }
   }
 
   const ANG_LBL = { rad: 'Rad', deg: 'Deg', gra: 'Gra' };
@@ -395,7 +427,7 @@
       if (kind === 'complex') seg(S.complex === 'real' ? 'Real' : 'Cplx', 'Real/Complex umschalten', () => { S.complex = S.complex === 'real' ? 'cplx' : 'real'; });
       if (kind === 'angle') seg(ANG_LBL[S.angle], 'Winkelmodus umschalten', () => { S.angle = S.angle === 'rad' ? 'deg' : S.angle === 'deg' ? 'gra' : 'rad'; });
     });
-    if (App.cur && App.cur.statusExtra) App.cur.statusExtra().forEach(t => st.appendChild(h('span', { text: t, style: 'padding:0 4px;color:#333' })));
+    if (App.cur && App.cur.statusExtra) App.cur.statusExtra().forEach(t => st.appendChild(h('span', { class: 'xt', text: t })));
     if (App.shift) st.appendChild(h('span', { class: 'st-shift', text: 'Shift' }));
     st.appendChild(h('span', { class: 'bat', title: 'Batterie' }, h('i')));
   }
@@ -478,7 +510,7 @@
       bt.addEventListener('click', () => { if (b.action(box) !== false) close(); App.save(); });
       df.appendChild(bt);
     });
-    const okB = h('button', { type: 'button', text: opts.okLabel || 'OK' });
+    const okB = h('button', { type: 'button', class: 'def', text: opts.okLabel || 'OK' });
     okB.addEventListener('click', rec.ok);
     df.appendChild(okB);
     if (opts.cancel !== false && opts.ok) {
@@ -667,26 +699,119 @@
   };
   App.rotate = function () {
     App.land = !App.land;
-    document.getElementById('device').classList.toggle('land', App.land);
-    const lt = document.getElementById('btn-land');
-    if (lt) lt.setAttribute('aria-pressed', String(App.land));
+    applyRotation();
     App.fit();
     if (App.cur && App.cur.layout) App.cur.layout();
+    App.refreshChrome();
     App.save();
+  };
+  function applyRotation() {
+    document.getElementById('screen').classList.toggle('rot', App.land);
+  }
+
+  /* ---------- Erscheinungsbild umschalten ---------- */
+  const THEME_KEY = 'mathpad2.theme';
+  const mqLight = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+  const resolveTheme = p => (p === 'auto' ? (mqLight && mqLight.matches ? 'light' : 'dark') : p === 'light' ? 'light' : 'dark');
+  function paintTheme() {
+    const t = resolveTheme(App.themePref), root = document.documentElement;
+    root.setAttribute('data-theme', t);
+    root.setAttribute('data-pref', App.themePref);
+    App.theme = t;
+    const meta = document.getElementById('theme-color');
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#1c1c1e' : '#f6f6f6');
+    const seg = document.getElementById('theme-seg');
+    if (seg) seg.querySelectorAll('button').forEach((b, i) => {
+      const on = b.dataset.pref === App.themePref;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on) { seg.style.setProperty('--i', i); seg.dataset.i = i; }
+    });
+    // Grafiken (Canvas) zeichnen ihre Farben selbst und muessen neu gezeichnet werden
+    if (App.cur) App.refreshAll();
+  }
+  App.setTheme = function (pref, animate) {
+    if (pref !== 'light' && pref !== 'auto') pref = 'dark';
+    const changes = resolveTheme(pref) !== resolveTheme(App.themePref);
+    App.themePref = pref;
+    try { localStorage.setItem(THEME_KEY, pref); } catch (e) { /* privat: nur fuer diese Sitzung */ }
+    const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (animate && changes && !calm && document.startViewTransition) document.startViewTransition(paintTheme);
+    else if (animate && changes && !calm) {
+      const root = document.documentElement;
+      root.classList.add('theme-anim');
+      paintTheme();
+      setTimeout(() => root.classList.remove('theme-anim'), 420);
+    } else paintTheme();
+    App.save();
+  };
+  function bindChrome() {
+    const seg = document.getElementById('theme-seg');
+    if (seg) {
+      const btns = Array.from(seg.querySelectorAll('button'));
+      btns.forEach(b => b.addEventListener('click', () => App.setTheme(b.dataset.pref, true)));
+      // Radiogruppe: Pfeiltasten wechseln wie bei macOS
+      seg.addEventListener('keydown', e => {
+        const i = btns.findIndex(b => b.dataset.pref === App.themePref);
+        let n = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') n = (i + 1) % btns.length;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') n = (i + btns.length - 1) % btns.length;
+        if (n < 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        App.setTheme(btns[n].dataset.pref, true);
+        btns[n].focus();
+      });
+    }
+    if (mqLight) {
+      const onSys = () => { if (App.themePref === 'auto') { const r = document.documentElement; r.classList.add('theme-anim'); paintTheme(); setTimeout(() => r.classList.remove('theme-anim'), 420); } };
+      if (mqLight.addEventListener) mqLight.addEventListener('change', onSys); else if (mqLight.addListener) mqLight.addListener(onSys);
+    }
+    [['zoom-out', -1], ['zoom-fit', 0], ['zoom-in', 1]].forEach(([id, d]) => { const b = document.getElementById(id); if (b) b.addEventListener('click', () => setZoom(d)); });
+    const hb = document.getElementById('btn-help'), hp = document.getElementById('help');
+    if (hb && hp) {
+      hb.addEventListener('click', () => App.toggleHelp());
+      document.addEventListener('pointerdown', e => { if (!hp.hidden && !hp.contains(e.target) && !hb.contains(e.target)) App.toggleHelp(false); });
+    }
+  }
+  App.toggleHelp = function (show) {
+    const hb = document.getElementById('btn-help'), hp = document.getElementById('help');
+    if (!hb || !hp) return false;
+    const on = show === undefined ? hp.hidden : show;
+    if (on === !hp.hidden) return false;
+    hp.hidden = !on;
+    hb.setAttribute('aria-expanded', String(on));
+    return true;
   };
 
   /* ---------- Skalierung ---------- */
+  // Groesse: "Fit" passt das Geraet in das Fenster, +/- vergroessert schrittweise (dann scrollt die Seite)
+  App.zoom = 0;
   App.fit = function () {
     const stage = document.getElementById('stage'), fit = document.getElementById('fit'), dev = document.getElementById('device');
     const w = dev.offsetWidth, hgt = dev.offsetHeight;
-    const aw = stage.clientWidth - 32, ah = stage.clientHeight - 20;
-    const s = Math.max(0.4, Math.min(aw / w, ah / hgt, 2.2));
+    const W = App.land ? hgt : w, H = App.land ? w : hgt;
+    // verfuegbare Flaeche: Buehne unter der Titelleiste, abzueglich Rand
+    const aw = (stage.clientWidth || window.innerWidth) - 32, ah = (stage.clientHeight || window.innerHeight) - 32;
+    const fitS = Math.max(0.3, Math.min(aw / W, ah / H, 2));
+    const s = App.zoom ? App.zoom : fitS;
     App.scale = s;
-    dev.style.transform = 'scale(' + s + ')';
-    fit.style.width = w * s + 'px';
-    fit.style.height = hgt * s + 'px';
+    dev.style.transform = App.land ? 'translate(0,' + (w * s) + 'px) rotate(-90deg) scale(' + s + ')' : 'scale(' + s + ')';
+    fit.style.width = W * s + 'px';
+    fit.style.height = H * s + 'px';
+    const zv = document.getElementById('zoom-val');
+    if (zv) zv.textContent = App.zoom ? Math.round(s * 100) + ' %' : 'Fit';
     if (App.cur && App.cur.onScale) App.cur.onScale();
   };
+  function setZoom(dir) {
+    const steps = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2];
+    const cur = App.scale;
+    if (dir === 0) App.zoom = 0;
+    else if (dir > 0) App.zoom = steps.find(v => v > cur + 0.01) || 2;
+    else App.zoom = steps.slice().reverse().find(v => v < cur - 0.01) || 0.5;
+    App.fit();
+    App.save();
+  }
 
   /* ---------- Mac-Tastatur ---------- */
   const KEYMAP = {
@@ -697,7 +822,8 @@
   function onKeyDown(e) {
     const t = e.target;
     const inField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
-    if (e.key === 'Escape') { e.preventDefault(); if (menuOpen()) closeMenus(); else iconPress('esc'); return; }
+    if (e.key === 'Escape') { e.preventDefault(); if (App.toggleHelp(false)) return; if (menuOpen()) closeMenus(); else iconPress('esc'); return; }
+    if (t && t.closest && t.closest('.titlebar, .help') && (e.key === 'Enter' || e.key === ' ' || e.key === 'Tab' || e.key.startsWith('Arrow'))) return;
     if (inField) {
       if (e.key === 'Enter') {
         const d = topDialog();
@@ -761,22 +887,18 @@
       Object.keys(App.env.fns).forEach(k => App.env.userFns.add(k));
       App.kbTab = KB[saved.kbTab] ? saved.kbTab : 'Math1';
       App.land = !!saved.land;
+      App.zoom = +saved.zoom || 0;
     }
+    let pref = saved && saved.theme;
+    try { pref = localStorage.getItem(THEME_KEY) || pref; } catch (e) { /* egal */ }
+    App.themePref = pref === 'light' || pref === 'auto' ? pref : 'dark';
+    paintTheme();
     App.env.settings = App.settings;
-    // Erster Start: auf kleinen Bildschirmen (MacBook) gleich quer, damit die Schrift gross genug ist
-    if (!saved) {
-      const dev = document.getElementById('device'), stage = document.getElementById('stage');
-      const s = Math.min((stage.clientWidth - 32) / dev.offsetWidth, (stage.clientHeight - 20) / dev.offsetHeight);
-      App.land = s < 0.9 && stage.clientWidth > stage.clientHeight;
-    }
     // Klicks auf Tasten nehmen Eingabefeldern nicht den Fokus weg
     document.getElementById('device').addEventListener('mousedown', e => { if (!e.target.closest('input, select')) e.preventDefault(); });
     for (const k in App.apps) if (App.apps[k].init) App.apps[k].init(saved && saved.apps ? saved.apps[k] : null);
-    document.getElementById('device').classList.toggle('land', App.land);
-    const lt = document.getElementById('btn-land');
-    if (lt) { lt.setAttribute('aria-pressed', String(App.land)); lt.addEventListener('click', () => App.rotate()); }
-    const hb = document.getElementById('btn-help'), hp = document.getElementById('help');
-    if (hb && hp) hb.addEventListener('click', () => { hp.hidden = !hp.hidden; hb.setAttribute('aria-pressed', String(!hp.hidden)); });
+    applyRotation();
+    bindChrome();
     App.open(saved && App.apps[saved.cur] ? saved.cur : 'main');
     App.fit();
     window.addEventListener('resize', App.fit);

@@ -1,26 +1,47 @@
 <!doctype html>
-<html lang="de">
+<html lang="de" data-theme="dark" data-pref="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MathPad II</title>
 <meta name="description" content="CAS-Grafikrechner im Stil des ClassPad II. Eine Datei, läuft offline in jedem Browser.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='1' width='20' height='30' rx='4' fill='%2317191c' stroke='%231f7fd6' stroke-width='2'/%3E%3Crect x='9' y='4' width='14' height='12' fill='%23fff'/%3E%3Cpath d='M10 13c2-6 4-6 6-2s3 3 6-4' fill='none' stroke='%231a4fd8' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%233ea2ff'/%3E%3Cstop offset='1' stop-color='%230a5ce6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='28' height='28' rx='6.5' fill='url(%23g)'/%3E%3Cpath d='M5 15l2.5-1.2 3.6 7.2L16 6h7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#1c1c1e" id="theme-color">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>
+/* Erscheinungsbild vor dem ersten Bild setzen, damit nichts aufblitzt */
+(function () { var p = 'dark'; try { p = localStorage.getItem('mathpad2.theme') || 'dark'; } catch (e) {}
+  var t = p === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : p === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t); document.documentElement.setAttribute('data-pref', p); })();
+</script>
 <style>
 /*__CSS__*/
 </style>
 </head>
 <body>
-<header class="topbar">
-  <span class="name">MathPad II</span>
-  <span class="sub">CAS-Grafikrechner im Stil des ClassPad II · offline</span>
-  <span class="sp"></span>
-  <button type="button" class="tb-btn" id="btn-land" aria-pressed="false" title="Rotate: Bildschirm quer, Tasten daneben">Quer</button>
-  <button type="button" class="tb-btn" id="btn-help" aria-pressed="false">Tastatur-Hilfe</button>
+<header class="titlebar" aria-label="Ansicht">
+  <div class="brand">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><defs><linearGradient id="brand-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3ea2ff"/><stop offset="1" stop-color="#0a5ce6"/></linearGradient></defs><rect width="28" height="28" rx="6.5" fill="url(#brand-g)"/><path d="M5 15l2.5-1.2 3.6 7.2L16 6h7" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div><b>MathPad II</b><small>CAS-Grafikrechner</small></div>
+  </div>
+  <div class="seg" id="theme-seg" role="radiogroup" aria-label="Erscheinungsbild" style="--n:3;--i:1" data-i="1">
+    <span class="thumb" aria-hidden="true"></span>
+    <button type="button" role="radio" data-pref="light" aria-checked="false" tabindex="-1" title="Hell"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.9"/><path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.3 3.3l1.1 1.1M11.6 11.6l1.1 1.1M3.3 12.7l1.1-1.1M11.6 4.4l1.1-1.1"/></svg><span>Hell</span></button>
+    <button type="button" role="radio" data-pref="dark" aria-checked="true" tabindex="0" title="Dunkel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.6 10A6 6 0 0 1 6 2.4 6 6 0 1 0 13.6 10z"/></svg><span>Dunkel</span></button>
+    <button type="button" role="radio" data-pref="auto" aria-checked="false" tabindex="-1" title="Automatisch wie das System"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg><span>Auto</span></button>
+  </div>
+  <div class="tools">
+    <div class="pill" role="group" aria-label="Zoom">
+      <button type="button" id="zoom-out" title="Kleiner" aria-label="Kleiner"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
+      <button type="button" id="zoom-fit" class="zv" title="An Fenster anpassen"><span id="zoom-val">Fit</span></button>
+      <button type="button" id="zoom-in" title="Größer" aria-label="Größer"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9"/></svg></button>
+    </div>
+    <button type="button" class="round" id="btn-help" aria-expanded="false" aria-controls="help" title="Tastatur-Hilfe" aria-label="Tastatur-Hilfe">?</button>
+  </div>
 </header>
-<main id="stage">
-  <div id="fit"><div id="device"></div></div>
-  <aside id="help" class="help" hidden>
+<aside id="help" class="help" hidden>
     <h2>Mit der Mac-Tastatur</h2>
     <table>
       <tr><td><kbd>Enter</kbd></td><td>EXE (ausrechnen)</td></tr>
@@ -37,7 +58,7 @@
       <tr><td>sin( cos( ln( …</td><td>Funktionsnamen einfach tippen</td></tr>
       <tr><td>define f(x)=x^2</td><td>Leertaste nach „define“ macht daraus den Befehl Define</td></tr>
     </table>
-    <h2 style="margin-top:12px">Am Gerät</h2>
+    <h2 style="margin-top:14px">Am Gerät</h2>
     <table>
       <tr><td>Keyboard</td><td>Soft-Tastatur: Math1, Math2 (∫, d/dx, lim, Σ, Matrizen), Trig, Var, abc</td></tr>
       <tr><td>Shift +</td><td>( → {  · ) → }  · , → ⇒  · = → ≠  · 0 → π  · . → i  · EXP → e  · ^ → √  · ÷ → Bruch  · (−) → ans  · EXE → ≈  · ← → Entf  · Clear → Aus</td></tr>
@@ -45,9 +66,12 @@
       <tr><td>Ergebnis antippen</td><td>übernimmt es in die Eingabe</td></tr>
       <tr><td>alte Eingabe antippen</td><td>bearbeiten und neu ausrechnen</td></tr>
       <tr><td>Graph</td><td>ziehen = verschieben, Trackpad/Mausrad = zoomen</td></tr>
+      <tr><td>Hell · Dunkel · Auto</td><td>Erscheinungsbild oben in der Titelleiste, Auto folgt macOS</td></tr>
     </table>
     <p>Alles bleibt in diesem Browser gespeichert (Verlauf, Funktionen, Listen, Einstellungen). Zurücksetzen: Menu → System.</p>
   </aside>
+<main id="stage">
+  <div id="fit"><div id="device"></div></div>
 </main>
 <script>
 /* nerdamer-prime 1.5.0 (MIT, © together-science) mit big-integer (Public Domain) und decimal.js (MIT, © Michael Mclaughlin) */

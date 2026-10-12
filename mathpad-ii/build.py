@@ -1,7 +1,9 @@
 import os, sys
 D = os.path.dirname(os.path.abspath(__file__))
 src = lambda f: open(os.path.join(D, 'src', f), encoding='utf-8').read()
-order = ['core.js', 'boxes.js', 'display.js', 'numeric.js', 'cas.js', 'editor.js', 'shell.js', 'app-main.js', 'app-graph.js', 'app-stat.js', 'app-misc.js']
+order = ['core.js', 'boxes.js', 'display.js', 'numeric.js', 'cas.js', 'editor.js', 'shell.js', 'plot.js', 'app-main.js', 'app-graph.js', 'app-stat.js',
+         'app-seq.js', 'app-conics.js', 'app-deq.js', 'app-3d.js', 'app-fin.js', 'app-sheet.js', 'app-eact.js', 'app-prog.js', 'app-geom.js', 'app-econ.js', 'app-misc.js']
+order = [f for f in order if os.path.exists(os.path.join(D, 'src', f))]
 app = '\n'.join(src(f) for f in order)
 nerd = open(os.path.join(D, 'node_modules/nerdamer-prime/all.min.js'), encoding='utf-8').read()
 assert '</script' not in nerd.lower() and '</script' not in app.lower()

@@ -950,6 +950,16 @@
     return simp(C.bin('-', s, C.num(String(Math.trunc(v)))), ctx);
   };
   CMD.round = (args, ctx) => numericFallback('round', args, ctx);
+  // Verteilungen: immer numerisch (wie am ClassPad)
+  Object.keys(NUM.DIST).forEach(nm => {
+    CMD[nm] = (args, ctx) => {
+      const vals = args.map(a => numericValue(simp(red(a, ctx), ctx)));
+      if (vals.some(v => isNaN(v))) throw ME('Wrong Argument Type');
+      const v = NUM.DIST[nm](...vals);
+      if (!isFinite(v) && !(nm.startsWith('inv') && !isNaN(v))) throw ME('Math ERROR');
+      return isFinite(v) ? floatAst(v) : (v > 0 ? C.sym('Infinity') : { type: 'neg', a: C.sym('Infinity') });
+    };
+  });
   CMD.rand = () => floatAst(Math.random());
   CMD.randint = (args, ctx) => {
     const a = numericValue(simp(red(args[0], ctx), ctx)), b = numericValue(simp(red(args[1], ctx), ctx));

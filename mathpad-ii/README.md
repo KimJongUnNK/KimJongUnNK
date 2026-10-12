@@ -9,18 +9,38 @@ gerechnet wird mit eigenem Code plus der eingebetteten Open-Source-CAS-Bibliothe
 
 ## Was drin ist
 
+Das App-Menü hat alle 15 Apps des ClassPad II in der Original-Reihenfolge.
+
 | App | Funktionen |
 | --- | --- |
-| **Main** | Natural Display (Brüche, Wurzeln, Potenzen, ∫, d/dx, lim, Σ, Π, Matrizen, \|x\|, log_b) mit Cursor in den Vorlagen. Exakte Ergebnisse (½, √2, π), Standard/Decimal, Real/Cplx, Rad/Deg/Gra. Befehle: `solve` (inkl. Systeme, Ungleichungen, allgemeine Trig-Lösungen mit `constn(1)`), `diff`, `∫` (unbestimmt/bestimmt/uneigentlich), `lim`, `Σ`, `Π`, `factor`, `expand`, `simplify`, `partfrac`, `det`, `trn`, Matrix-Inverse, Listen, `nCr`, `nPr`, `gcd`, `lcm`, `mod`, `fMax`, `fMin`, `Define f(x)=…`, `⇒` Variablen, `ans`. Alte Zeilen antippen und neu rechnen, Ergebnis antippen und übernehmen. Action- und Interactive-Menüs, ½⇔0.5-Umschalter |
-| **Graph & Table** | 5 Sheets × 20 Funktionen, Typen y=, r= (polar), x=. Pan mit Maus, Zoom mit Trackpad oder Mausrad, Zoom-Menü (Box, In, Out, Auto, Square, Integer, Previous, Quick Initialize/Trig/Standard), View Window, Trace, G-Solve (Root, Max, Min, fMax, fMin, y-Intercept, Intersection, y-Cal, x-Cal, Inflection, ∫dx mit Schattierung), Wertetabelle |
+| **Main** | Natural Display (Brüche, Wurzeln, Potenzen, ∫, d/dx, lim, Σ, Π, Matrizen, \|x\|, log_b) mit Cursor in den Vorlagen. Exakte Ergebnisse (½, √2, π), Standard/Decimal, Real/Cplx, Rad/Deg/Gra. Befehle: `solve` (inkl. Systeme, Ungleichungen, allgemeine Trig-Lösungen mit `constn(1)`), `diff`, `∫` (unbestimmt/bestimmt/uneigentlich), `lim`, `Σ`, `Π`, `factor`, `expand`, `simplify`, `partfrac`, `det`, `trn`, Matrix-Inverse, Listen, `nCr`, `nPr`, `gcd`, `lcm`, `mod`, `fMax`, `fMin`, `Define f(x)=…`, `⇒` Variablen, `ans`. Verteilungen: `normPDf`, `normCDf`, `invNormCDf`, `binomialPDf/CDf`, `poissonPDf/CDf`, `geoPDf/CDf`, `tPDf/CDf`, `chiPDf/CDf`, `fPDf/CDf` und die Inversen `invTCDf`, `invChiCDf`, `invFCDf` (rechtes Ende wie am ClassPad), `invBinomialCDf`, `invPoissonCDf`, `invGeoCDf`. Alte Zeilen antippen und neu rechnen, Ergebnis antippen und übernehmen. Action- und Interactive-Menüs, ½⇔0.5-Umschalter |
+| **eActivity** | Dokument aus Text- und Rechenzeilen, Beispiel „Kurvendiskussion“, alles neu berechnen |
 | **Statistics** | list1–list6, One-/Two-Variable (x̄, σ, s, Quartile, Modus …), Regressionen linear, quadratisch, kubisch, quartisch, logarithmisch, exponentiell (a·e^bx und a·b^x), Potenz. Scatter, xyLine, Histogramm, MedBox. Regressionsformel per Klick nach Graph & Table |
-| **Num Solve** | Gleichung mit beliebig vielen Variablen, Unbekannte wählen, Grenzen, Left−Right-Kontrolle |
+| **Spreadsheet** | Zellen A–Z × 999, Formeln mit `=`, Bereiche `A1:A9`, `sum`, `mean`, `count` und alle CAS-Funktionen, Ausfüllen nach unten mit relativen Bezügen, Ausschneiden/Kopieren/Einfügen |
+| **Graph & Table** | 5 Sheets × 20 Funktionen, Typen y=, r= (polar), x=. Pan mit Maus, Zoom mit Trackpad oder Mausrad, Zoom-Menü (Box, In, Out, Auto, Square, Integer, Previous, Quick Initialize/Trig/Standard), View Window, Trace, G-Solve (Root, Max, Min, fMax, fMin, y-Intercept, Intersection, y-Cal, x-Cal, Inflection, ∫dx mit Schattierung), Wertetabelle |
+| **Geometry** | Punkt, Strecke, Gerade, Kreis, Polygon, Mittelpunkt, Schnittpunkt; Punkte ziehen, alles hängt live mit. Messwerte: Koordinaten, Länge, Geradengleichung, Steigungswinkel, Kreisgleichung, Fläche, Umfang, Abstand, Winkel aus drei Punkten |
+| **Conics** | Vorlagen für Parabel, Kreis, Ellipse, Hyperbel und allgemeine Form; Analyse mit Typ, Mittelpunkt, Brennpunkten, Scheitelpunkten, Exzentrizität, Asymptoten |
+| **3D Graph** | z1–z3 als schattierte Flächen, mit der Maus drehen, zoomen, 3D-View-Window |
+| **Sequence** | Rekursiv (aₙ₊₁ aus aₙ, bₙ, cₙ, n) und explizit, Wertetabelle und Punktgraph |
+| **Financial** | Zinseszins/TVM (n, I%, PV, PMT, FV lösen), einfache Zinsen, Zinsumrechnung, Kosten/Verkauf/Marge, Cashflow (NPV, IRR, PBP, NFV), Tilgungsplan, Tage zählen, Abschreibung |
+| **Program** | Editor und Interpreter: `Input`, `Print`, `Locate`, `Message`, `ClrText`, `Local`, `If/Then/Else/IfEnd`, `For…To…Step/Next`, `While/WhileEnd`, `Do/LpWhile`, `Break`, `Skip`, `Return`, `⇒`; Beispiele `quadrat` und `fibo` |
+| **E-CON EA-200** | Setup Wizard für Bewegung, Temperatur, Spannung, Licht und Mikrofon, Intervall, Anzahl, Trigger. Ohne angeschlossenen Datenlogger läuft die Messung als physikalisch plausible Simulation mit Live-Graph; Messreihe per Klick nach list1/list2 und in Statistics |
+| **NumSolve** | Gleichung mit beliebig vielen Variablen, Unbekannte wählen, Grenzen, Left−Right-Kontrolle |
+| **DiffEqGraph** | dy/dx = f(x, y): Richtungsfeld, Lösungskurven (Runge-Kutta 4), Anfangswerte per Klick |
 | **System** | Speicherübersicht, Variablen löschen, alles zurücksetzen |
 
-Gerät: Hardware-Tasten wie am CP400 (inkl. Shift-Ebene), Icon-Leiste (Settings, Menu, Main, Resize,
-Swap, Rotate, Esc), Soft-Keyboard (Math1, Math2, Trig, Var, abc), Statusleiste zum Antippen,
-Aus/An über Shift+Clear. Auf Laptop-Bildschirmen startet die App quer (Rotate), damit die Schrift groß ist.
-Alles wird im Browser gespeichert (localStorage) und ist nach dem Neuladen wieder da.
+Gerät: Gehäuse im Hochformat mit den Proportionen des fx-CP400 (89 × 206 mm, LCD 320 × 528 Pixel),
+Hardware-Tasten inkl. Shift-Ebene, Icon-Leiste (Settings, Menu, Main, Resize, Swap, Rotate, Esc),
+Soft-Keyboard (Math1, Math2, Trig, Var, abc), Statusleiste zum Antippen, Aus/An über Shift+Clear.
+Rotate dreht das ganze Gerät quer. Alles wird im Browser gespeichert (localStorage).
+
+## Erscheinungsbild
+
+Oben in der Titelleiste: **Hell · Dunkel · Auto** als Segmented Control wie in macOS. Dunkel ist der
+Standard; Auto folgt der Systemeinstellung, auch live. Bildschirm, Menüs, Dialoge, Soft-Keyboard,
+Tabellen und alle Grafiken wechseln mit (Apple-Systemfarben, SF-Schrift, Glas-Effekte, iOS-Icons im
+App-Menü). Das Gehäuse ist Hardware und bleibt gleich. Die Wahl wird gespeichert und schon vor dem
+ersten Bild gesetzt, nichts blitzt auf. Daneben: Zoom (−, Fit, +) und die Tastatur-Hilfe als Popover.
 
 ## Mac-Tastatur
 
@@ -39,8 +59,8 @@ Alles wird im Browser gespeichert (localStorage) und ist nach dem Neuladen wiede
 ```bash
 npm install          # nerdamer-prime 1.5.0
 npm run build        # baut dist/MathPad-II.html (eine Datei, alles eingebettet)
-npm test             # 88 Rechenkern-Tests in Node
-npm run test:e2e     # 44 Browser-Prüfungen mit Playwright (Chromium)
+npm test             # 106 Rechenkern-Tests in Node
+npm run test:e2e     # 71 Browser-Prüfungen mit Playwright (Chromium)
 ```
 
 Aufbau (`src/`):
@@ -52,12 +72,14 @@ Aufbau (`src/`):
 - `cas.js` CAS-Befehle über nerdamer mit eigenen Fallbacks (exakte Logarithmen, Trig-Tabellen,
   komplexe Normalform, numerische Lösungen mit Wiedererkennung von ln, e, π, √)
 - `editor.js` Natural-Input-Editor mit Cursor-Navigation
-- `shell.js` Gerät, Tasten, Menüs, Dialoge, Soft-Keyboard, Speichern
+- `shell.js` Gerät, Tasten, Menüs, Dialoge, Soft-Keyboard, Speichern, Erscheinungsbild
+- `plot.js` gemeinsames Grafikfenster (Raster, Achsen, Pan/Zoom) für die Grafik-Apps
 - `app-*.js` die Anwendungen
 
 ## Grenzen
 
-- Nicht nachgebaut: eActivity, Spreadsheet, Geometry, Conics, 3D Graph, Sequence, Financial, Program, E-CON.
+- E-CON simuliert die Messung; ein echter EA-200 lässt sich aus dem Browser nicht ansprechen.
+- Geometry, Program und Spreadsheet decken die gängigen Funktionen ab, nicht jedes Detail des Originals.
 - Die Symbolik ist stark, aber nicht auf ClassPad-Niveau. Wo nerdamer keine exakte Form findet, kommt ein
   Dezimalergebnis, zum Beispiel bei manchen bestimmten Integralen (`∫₀¹ e^(−x²)dx = 0.7468241328`).
 - Getestet in Chromium. Safari und Firefox nutzen dieselben Standard-APIs, wurden hier aber nicht automatisiert geprüft.

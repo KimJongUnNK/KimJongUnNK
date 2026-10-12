@@ -187,7 +187,7 @@
       const read = (d, id) => d.querySelector('#' + id).value.trim();
       const items = s => textToItems(s);
       const done = out => { this.ed.setItems(B.clone(out)); this.exec(false); };
-      const prev = h('div', { class: 'm', style: 'margin-bottom:6px;padding:2px;border:1px dotted #aab' });
+      const prev = h('div', { class: 'm prev-box' });
       prev.appendChild(B.render(B.row(B.clone(cur)), {}));
       switch (kind) {
         case 'solve':

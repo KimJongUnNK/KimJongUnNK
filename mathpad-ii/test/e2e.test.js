@@ -136,9 +136,11 @@ async function run(viewport, fn) {
   ok('Formel kopiert', /y\d+/.test(msg), msg);
   await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
   // 13) Rotate über Icon
-  const l0 = await page.$eval('#device', e => e.classList.contains('land'));
+  const l0 = await page.$eval('#screen', e => e.classList.contains('rot'));
   await page.click('.ipanel [data-icon="rotate"]');
-  ok('Rotate wechselt Ausrichtung', l0 !== await page.$eval('#device', e => e.classList.contains('land')));
+  ok('Rotate wechselt Ausrichtung', l0 !== await page.$eval('#screen', e => e.classList.contains('rot')));
+  const fb = await page.$eval('#fit', e => [e.offsetWidth, e.offsetHeight]);
+  ok('Rotate: Gerät liegt quer', fb[0] > fb[1], fb);
   await page.click('.ipanel [data-icon="rotate"]');
   // Enter nach Klick auf eine Taste = EXE, nicht die Taste nochmal
   await page.click('.ipanel [data-icon="main"]');
@@ -204,7 +206,7 @@ async function run(viewport, fn) {
   const binfo = await page.$eval('.ginfo', e => e.textContent);
   ok('MedBox', /Med 4\.5/.test(binfo), binfo);
   // Num Solve mit zwei Variablen
-  await page.click('.ipanel [data-icon="menu"]'); await page.click('.amenu button:has-text("Num Solve")');
+  await page.click('.ipanel [data-icon="menu"]'); await page.click('.amenu button:has-text("NumSolve")');
   await page.click('.solv .eq .fx'); await page.keyboard.press('Alt+Backspace');
   await page.keyboard.type('a*x^2=50');
   await page.waitForTimeout(100);
@@ -212,6 +214,98 @@ async function run(viewport, fn) {
   await page.click('.toolbar button:has-text("Solve")');
   const xv = await page.$eval('input[data-v="x"]', e => e.value);
   ok('Num Solve a·x²=50 (a=2) → x=5', xv === '5', xv);
+  });
+  // Erscheinungsbild, Hochformat und die weiteren Apps
+  await run({ width: 1440, height: 900 }, async page => {
+    const theme = () => page.evaluate(() => [document.documentElement.dataset.theme, MP.App.themePref, MP.App.theme]);
+    const fb = await page.$eval('#fit', e => [e.offsetWidth, e.offsetHeight]);
+    ok('Start im Hochformat', fb[1] > fb[0] * 2, fb);
+    ok('Dunkel ist Standard', JSON.stringify(await theme()) === '["dark","dark","dark"]', await theme());
+    const lcdBg = () => page.$eval('#screen', e => getComputedStyle(e).backgroundColor);
+    ok('LCD dunkel', await lcdBg() === 'rgb(0, 0, 0)', await lcdBg());
+    const open = async name => { await page.click('.ipanel [data-icon="menu"]'); await page.click('.amenu button:has-text("' + name + '")'); await page.waitForTimeout(250); };
+    await open('Graph&Table');
+    await page.click('.toolbar button[title="Graph zeichnen"]'); await page.waitForTimeout(150);
+    const px = () => page.evaluate(() => { const c = document.querySelector('.gwrap canvas'); const d = c.getContext('2d').getImageData(3, 3, 1, 1).data; return [d[0], d[1], d[2]]; });
+    ok('Graph-Hintergrund dunkel', (await px()).every(v => v < 20), await px());
+    await page.click('#theme-seg [data-pref="light"]'); await page.waitForTimeout(700);
+    ok('Umschalten auf Hell', JSON.stringify(await theme()) === '["light","light","light"]', await theme());
+    ok('LCD hell', await lcdBg() === 'rgb(255, 255, 255)', await lcdBg());
+    ok('Graph neu gezeichnet (hell)', (await px()).every(v => v > 235), await px());
+    ok('Segment-Zustand', await page.$eval('#theme-seg [data-pref="light"]', e => e.getAttribute('aria-checked')) === 'true');
+    await page.reload(); await page.waitForTimeout(500);
+    ok('Hell bleibt nach Reload', (await theme())[0] === 'light', await theme());
+    // Pfeiltasten in der Radiogruppe wechseln das Theme und landen nicht im Rechner
+    await page.focus('#theme-seg [data-pref="light"]');
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(600);
+    ok('Pfeil rechts → Dunkel', (await theme())[1] === 'dark', await theme());
+    // Auto folgt dem System, auch live
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.click('#theme-seg [data-pref="auto"]'); await page.waitForTimeout(600);
+    ok('Auto + System hell → hell', JSON.stringify(await theme()) === '["light","auto","light"]', await theme());
+    await page.emulateMedia({ colorScheme: 'dark' }); await page.waitForTimeout(600);
+    ok('Auto folgt System live → dunkel', (await theme())[0] === 'dark', await theme());
+    await page.click('#theme-seg [data-pref="dark"]'); await page.waitForTimeout(600);
+    // Hilfe-Popover
+    await page.click('#btn-help');
+    ok('Hilfe offen', !(await page.$eval('#help', e => e.hidden)));
+    await page.keyboard.press('Escape');
+    ok('Esc schließt Hilfe', await page.$eval('#help', e => e.hidden));
+    await page.click('#btn-help'); await page.mouse.click(30, 400);
+    ok('Klick daneben schließt Hilfe', await page.$eval('#help', e => e.hidden));
+    // App-Menü: alle 15 Apps
+    await page.click('.ipanel [data-icon="menu"]');
+    const apps = await page.$$eval('.amenu button', b => b.map(x => x.textContent));
+    ok('15 Apps im Menü', apps.length === 15, apps);
+    // Financial: Rate für 10 000 auf 60 Monate zu 4 %
+    await page.click('.amenu button:has-text("Financial")'); await page.waitForTimeout(200);
+    await page.fill('input[data-k="FV"]', '0');
+    await page.click('input[name="fin-unk"] >> nth=3');
+    await page.click('.toolbar button[title="Berechnen (EXE)"]');
+    const fin = await page.$eval('.solv .res', e => e.textContent);
+    ok('TVM: PMT ≈ 184.17', /184\.1[67]/.test(fin), fin);
+    // Spreadsheet: Summe mit Formel
+    await open('Spreadsheet');
+    const c5 = await page.$$eval('.ltab tbody tr', r => r[4] ? r[4].children[3].textContent : r.map(x => x.textContent));
+    ok('Spreadsheet C5 = 19.9', c5 === '19.9', c5);
+    // eActivity: Beispiel durchgerechnet
+    await open('eActivity');
+    const ea = await page.$$eval('.ea .entry', r => r.map(x => x.textContent).join(' | '));
+    ok('eActivity rechnet', ea.includes('{x=−1,x=1}') && ea.includes('done'), ea);
+    // Program: quadrat mit a=1, b=-3, c=2
+    await open('Program');
+    await page.selectOption('.pg-sel', 'quadrat');
+    await page.click('.toolbar button[title="Programm ausführen"]');
+    for (const v of ['1', '-3', '2']) { await page.waitForSelector('#pg-in'); await page.fill('#pg-in', v); await page.keyboard.press('Enter'); await page.waitForTimeout(120); }
+    await page.waitForTimeout(400);
+    const pout = await page.$$eval('.pg-line', l => l.map(x => x.textContent).join(' | '));
+    ok('Program quadrat → x=1, x=2', /x=1/.test(pout) && /x=2/.test(pout), pout);
+    // Geometry: Strecke zeichnen und messen
+    await open('Geometry');
+    const n0 = await page.evaluate(() => MP.App.apps.geom.objs.length);
+    await page.click('.toolbar button[title="Strecke"]');
+    const gb = await (await page.$('.gwrap')).boundingBox();
+    await page.mouse.click(gb.x + 30, gb.y + 40); await page.mouse.click(gb.x + 120, gb.y + 40);
+    const n1 = await page.evaluate(() => MP.App.apps.geom.objs.length);
+    ok('Geometry: Strecke mit 2 Punkten', n1 === n0 + 3, [n0, n1]);
+    await page.click('.toolbar button[title="Auswahl/Ziehen"]');
+    await page.mouse.click(gb.x + 75, gb.y + 40);
+    const gi = await page.$eval('.ginfo', e => e.textContent);
+    ok('Geometry misst Länge', /Länge \d/.test(gi), gi);
+    // E-CON: Messung sofort starten, Werte nach Statistics
+    await open('E-CON EA-200');
+    await page.selectOption('#ec-sensor', 'temp');
+    await page.selectOption('#ec-trig', 'now');
+    await page.click('.toolbar button[title="Messung starten"]');
+    await page.waitForFunction(() => !MP.App.apps.econ.running && MP.App.apps.econ.data.length === 120, null, { timeout: 8000 }).catch(() => {});
+    const ec = await page.evaluate(() => [MP.App.apps.econ.data.length, MP.App.apps.econ.data[0][1]]);
+    ok('E-CON: 120 Messwerte, Start ≈ 85 °C', ec[0] === 120 && Math.abs(ec[1] - 85) < 0.5, ec);
+    await page.click('.toolbar button[title="In Statistics öffnen (Regression)"]'); await page.waitForTimeout(300);
+    const st = await page.evaluate(() => [MP.App.curName, MP.App.apps.stat.lists[0].length, MP.App.apps.stat.lists[1].length]);
+    ok('E-CON → Statistics list1/list2', st[0] === 'stat' && st[1] === 120 && st[2] === 120, st);
+    // Sequence, Conics, DiffEq, 3D: zeichnen ohne Fehler
+    for (const a of ['Sequence', 'Conics', 'DiffEqGraph', '3D Graph']) await open(a);
+    ok('Grafik-Apps geöffnet', (await page.evaluate(() => MP.App.curName)) === 'g3d');
   });
   console.log(fails ? fails + ' Browser-Tests fehlgeschlagen' : 'Alle Browser-Tests bestanden');
   process.exit(fails ? 1 : 0);

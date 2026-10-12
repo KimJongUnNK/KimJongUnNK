@@ -126,7 +126,7 @@
       this.resEl.textContent = '';
       const r = this.result;
       if (!r) return;
-      if (r.err) { this.resEl.appendChild(h('div', { style: 'color:#c62828', text: r.err })); return; }
+      if (r.err) { this.resEl.appendChild(h('div', { class: 'err', text: r.err })); return; }
       this.resEl.append(h('div', null, h('b', { text: r.u + ' = ' }), C.fmtFloat(r.x, { mode: 'norm2' })), h('div', null, 'Left−Right = ', C.fmtFloat(r.lr === 0 ? 0 : r.lr, { mode: 'norm2' })));
     },
     fieldEnter() { this.solve(); return true; },
@@ -162,36 +162,52 @@
   App.register('solver', Solver);
 
   /* ---------- App-Menue ---------- */
+  // Glyphen in Weiss; Verlauf und Form kommen aus dem CSS (.ico.<app>)
+  const I = inner => '<svg viewBox="0 0 30 30" aria-hidden="true">' + inner + '</svg>';
   const ICON = {
-    main: '<svg viewBox="0 0 38 34"><path d="M4 19l3-1.5 4 9 6-21h8" fill="none" stroke="#1a4fd8" stroke-width="2.2" stroke-linejoin="round"/><text x="23" y="28" font-size="14" font-family="Arial" fill="#e0201b">α</text></svg>',
-    graph: '<svg viewBox="0 0 38 34"><path d="M3 30h32M6 3v30" stroke="#333" stroke-width="1.4"/><path d="M6 24c6-20 10-20 14-9s8 11 15-6" fill="none" stroke="#1a4fd8" stroke-width="2.2"/><path d="M6 10c7 2 13 18 29 16" fill="none" stroke="#e0201b" stroke-width="2"/></svg>',
-    stat: '<svg viewBox="0 0 38 34"><path d="M4 30h31" stroke="#333" stroke-width="1.4"/><rect x="7" y="18" width="5" height="12" fill="#1a4fd8"/><rect x="14" y="9" width="5" height="21" fill="#15a01a"/><rect x="21" y="13" width="5" height="17" fill="#e07b00"/><rect x="28" y="5" width="5" height="25" fill="#e0201b"/></svg>',
-    solver: '<svg viewBox="0 0 38 34"><text x="3" y="15" font-size="11" font-family="Arial" fill="#111">f(x)=0</text><path d="M4 25h30" stroke="#333" stroke-width="1.2"/><circle cx="21" cy="25" r="3.2" fill="#e0201b"/><path d="M6 31c6-14 18-14 26-12" fill="none" stroke="#1a4fd8" stroke-width="2"/></svg>',
-    system: '<svg viewBox="0 0 38 34"><rect x="8" y="3" width="22" height="28" rx="3" fill="#2a2e34"/><rect x="11" y="6" width="16" height="10" fill="#cfe0f6"/><g fill="#fff"><rect x="11" y="19" width="4" height="3"/><rect x="17" y="19" width="4" height="3"/><rect x="23" y="19" width="4" height="3"/><rect x="11" y="24" width="4" height="3"/><rect x="17" y="24" width="4" height="3"/><rect x="23" y="24" width="4" height="3" fill="#1f6fd8"/></g></svg>'
+    main: I('<path d="M3 16l3-1.5 4.5 9L17 5h10"/><text class="t" x="18" y="25" font-size="11.5">α</text>'),
+    eact: I('<rect x="7" y="3.5" width="16" height="23" rx="2.5"/><path class="o" d="M11 9h8M11 13h8"/><path d="M10.5 22c2-5 3.6-5 5-2s3 2.5 4.5-2.5"/>'),
+    stat: I('<rect class="f" x="4.5" y="15" width="4.2" height="11" rx="1.2"/><rect class="f" x="10.5" y="8" width="4.2" height="18" rx="1.2"/><rect class="f" x="16.5" y="12" width="4.2" height="14" rx="1.2"/><rect class="f" x="22.5" y="4" width="4.2" height="22" rx="1.2" opacity=".72"/>'),
+    sheet: I('<rect x="4" y="5" width="22" height="20" rx="2.8"/><path d="M4 11h22M4 18h22M11 5v20M18.5 5v20" stroke-width="1.5"/>'),
+    graph: I('<path class="o" d="M4 25h23M6 3v23" stroke-width="1.6"/><path d="M6 21c4-14 7-14 10-6s6 8 11-5"/>'),
+    geom: I('<path d="M4 25L15 5l11 20z"/><circle cx="15" cy="18.5" r="4.6" stroke-width="1.7"/>'),
+    conics: I('<ellipse cx="15" cy="16" rx="11" ry="6.5"/><path class="o" d="M7 3c2.5 14 13.5 14 16 0"/>'),
+    g3d: I('<path d="M15 3.5l10 5.5v12L15 26.5 5 21V9z"/><path d="M5 9l10 5.5L25 9M15 14.5v12" stroke-width="1.6"/>'),
+    seq: I('<circle class="f" cx="5.5" cy="24" r="2.3"/><circle class="f" cx="10.5" cy="22" r="2.3"/><circle class="f" cx="15.5" cy="18.5" r="2.3"/><circle class="f" cx="20.5" cy="12.5" r="2.3"/><circle class="f" cx="25.5" cy="4.5" r="2.3"/>'),
+    fin: I('<text class="t" x="15" y="23" font-size="20" text-anchor="middle">%</text>'),
+    prog: I('<path d="M6 9l6 6-6 6"/><path d="M15.5 22H24"/>'),
+    econ: I('<path d="M3 16h5l3-8 4 15 3-11 2 4h7"/>'),
+    solver: I('<path class="o" d="M3 17h24" stroke-width="1.6"/><path d="M4 26C9 4 18 4 26 9"/><circle class="f" cx="6.7" cy="17" r="2.6"/>'),
+    deq: I('<path class="o" d="M5 7l3-1.5M13 7l3-1M21 7h3M5 15l3-2M13 15l3-1.5M21 15l3-1M5 23l3-3M13 23l3-2M21 23l3-1.5" stroke-width="1.6"/><path d="M3 26C10 21 15 13 27 8"/>'),
+    system: I('<circle cx="15" cy="15" r="4"/><path d="M15 3.5v4M15 22.5v4M3.5 15h4M22.5 15h4M6.9 6.9l2.8 2.8M20.3 20.3l2.8 2.8M6.9 23.1l2.8-2.8M20.3 9.7l2.8-2.8"/>')
   };
-  const APPS = [['main', 'Main'], ['graph', 'Graph&Table'], ['stat', 'Statistics'], ['solver', 'Num Solve'], ['system', 'System']];
+  // Reihenfolge wie im Menue des ClassPad II
+  const APPS = [['main', 'Main'], ['eact', 'eActivity'], ['stat', 'Statistics'], ['sheet', 'Spreadsheet'], ['graph', 'Graph&Table'], ['geom', 'Geometry'],
+    ['conics', 'Conics'], ['g3d', '3D Graph'], ['seq', 'Sequence'], ['fin', 'Financial'], ['prog', 'Program'], ['econ', 'E-CON EA-200'],
+    ['solver', 'NumSolve'], ['deq', 'DiffEqGraph'], ['system', 'System']];
   const Menu = {
     title: 'Menu',
     statusKinds: [],
     hl: 0,
     mount(work) {
       this.grid = h('div', { class: 'amenu', role: 'menu' });
-      APPS.forEach(([k, l], i) => {
-        const b = h('button', { type: 'button', role: 'menuitem', class: i === this.hl ? 'hl' : null }, h('span', { class: 'ico', html: ICON[k] }), h('span', { text: l }));
+      APPS.filter(([k]) => App.apps[k]).forEach(([k, l], i) => {
+        const b = h('button', { type: 'button', role: 'menuitem', class: i === this.hl ? 'hl' : null }, h('span', { class: 'ico ' + k, html: ICON[k] }), h('span', { text: l }));
         b.addEventListener('click', () => App.open(k));
         this.grid.appendChild(b);
       });
       work.appendChild(h('div', { class: 'win active' }, this.grid));
     },
     paint() { Array.from(this.grid.children).forEach((b, i) => b.classList.toggle('hl', i === this.hl)); },
+    list() { return APPS.filter(([k]) => App.apps[k]); },
     key(k) {
-      const n = APPS.length;
+      const n = this.list().length;
       if (k === 'LEFT') this.hl = (this.hl + n - 1) % n;
       else if (k === 'RIGHT') this.hl = (this.hl + 1) % n;
-      else if (k === 'UP') this.hl = Math.max(0, this.hl - 3);
-      else if (k === 'DOWN') this.hl = Math.min(n - 1, this.hl + 3);
-      else if (k === 'EXE') { App.open(APPS[this.hl][0]); return true; }
-      else if (/^[1-9]$/.test(k) && +k <= n) { App.open(APPS[+k - 1][0]); return true; }
+      else if (k === 'UP') this.hl = Math.max(0, this.hl - 4);
+      else if (k === 'DOWN') this.hl = Math.min(n - 1, this.hl + 4);
+      else if (k === 'EXE') { App.open(this.list()[this.hl][0]); return true; }
+      else if (/^[1-9]$/.test(k) && +k <= n) { App.open(this.list()[+k - 1][0]); return true; }
       else return true;
       this.paint();
       return true;

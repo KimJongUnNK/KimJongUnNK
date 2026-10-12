@@ -3,7 +3,6 @@
   'use strict';
   const App = MP.App, B = MP.B, C = MP.core, NUM = MP.num, h = App.h, svg = App.svg;
 
-  const COLORS = ['#1a4fd8', '#e0201b', '#15a01a', '#c21fb0', '#111111', '#0b9db0', '#e07b00', '#6b4bd8'];
   const NROWS = 20;
   const DEFAULT_VIEW = () => ({ xmin: -7.7, xmax: 7.7, xscl: 1, ymin: -3.8, ymax: 3.8, yscl: 1, tmin: 0, tmax: 2 * Math.PI, tstep: Math.PI / 120 });
   const fmt = (v, d) => {
@@ -166,11 +165,13 @@
         const cb = h('input', { type: 'checkbox', 'aria-label': 'Graph ' + this.label(f, i) + ' zeichnen' });
         cb.checked = f.on;
         cb.addEventListener('click', e => { e.stopPropagation(); f.on = cb.checked; this.trace = null; this.gs = null; this.draw(); this.renderTableIfShown(); App.save(); });
-        const fx = h('div', { class: 'fx m' });
+        // Wie am Geraet: Zeile in Graphfarbe, "y1=" wenn belegt, "y4:" wenn leer
+        const col = App.pal().curves[i % 8];
+        const fx = h('div', { class: 'fx m', style: 'color:' + col });
         const row = h('div', { class: 'frow' + (i === this.sel ? ' sel' : '') },
-          cb, h('span', { class: 'fl', text: this.label(f, i) }), fx,
+          cb, h('span', { class: 'fl', style: 'color:' + col, text: this.label(f, i).slice(0, -1) + (f.items.length ? '=' : ':') }), fx,
           f.err ? h('span', { class: 'fe', text: 'ERR' }) : null,
-          h('span', { class: 'fs', style: 'border-color:' + COLORS[i % COLORS.length] }));
+          h('span', { class: 'fs', style: 'border-color:' + App.pal().curves[i % 8] }));
         row.addEventListener('pointerdown', e => {
           if (e.target === cb) return;
           e.preventDefault();
@@ -239,7 +240,7 @@
             this.cache[key] = fn;
           }
           f.err = null;
-          out.push({ i, f, fn, type: f.type, color: COLORS[i % COLORS.length], name: this.label(f, i).slice(0, -1) });
+          out.push({ i, f, fn, type: f.type, color: App.pal().curves[i % 8], name: this.label(f, i).slice(0, -1) });
         } catch (e) { f.err = 'ERR'; }
       });
       return out;
@@ -257,12 +258,13 @@
       const V = this.view, S = App.settings;
       const X = x => (x - V.xmin) / (V.xmax - V.xmin) * W, Y = y => H - (y - V.ymin) / (V.ymax - V.ymin) * H;
       this.X = X; this.Y = Y; this.W = W; this.H = H;
-      g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+      const P = App.pal();
+      g.fillStyle = P.bg; g.fillRect(0, 0, W, H);
       // Raster
       const xs = V.xscl > 0 ? V.xscl : 1, ys = V.yscl > 0 ? V.yscl : 1;
       const nx = (V.xmax - V.xmin) / xs, ny = (V.ymax - V.ymin) / ys;
       if (S.grid && nx < 150 && ny < 150) {
-        g.strokeStyle = '#cfe0f6'; g.lineWidth = 1;
+        g.strokeStyle = P.grid; g.lineWidth = 1;
         g.beginPath();
         for (let k = Math.ceil(V.xmin / xs); k * xs <= V.xmax; k++) { const px = Math.round(X(k * xs)) + 0.5; g.moveTo(px, 0); g.lineTo(px, H); }
         for (let k = Math.ceil(V.ymin / ys); k * ys <= V.ymax; k++) { const py = Math.round(Y(k * ys)) + 0.5; g.moveTo(0, py); g.lineTo(W, py); }
@@ -271,7 +273,7 @@
       // Achsen
       const ax = Math.round(Y(0)) + 0.5, ay = Math.round(X(0)) + 0.5;
       if (S.axes) {
-        g.strokeStyle = '#000'; g.lineWidth = 1;
+        g.strokeStyle = P.axis; g.lineWidth = 1;
         g.beginPath();
         if (V.ymin <= 0 && V.ymax >= 0) { g.moveTo(0, ax); g.lineTo(W, ax); }
         if (V.xmin <= 0 && V.xmax >= 0) { g.moveTo(ay, 0); g.lineTo(ay, H); }
@@ -283,7 +285,7 @@
         g.stroke();
       }
       if (S.labels) {
-        g.fillStyle = '#333'; g.font = '9px Helvetica, Arial, sans-serif';
+        g.fillStyle = P.label; g.font = '9px -apple-system, Helvetica, Arial, sans-serif';
         const stepX = xs * Math.max(1, Math.ceil(26 / (W / nx || 1))), stepY = ys * Math.max(1, Math.ceil(18 / (H / ny || 1)));
         const lx = Math.min(Math.max(ax, 2), H - 11), ly = Math.min(Math.max(ay, 2), W - 2);
         g.textAlign = 'center'; g.textBaseline = 'top';
@@ -305,7 +307,7 @@
       if (this.shade) {
         const f = vis.find(v => v.i === this.shade.i);
         if (f) {
-          g.fillStyle = 'rgba(26,79,216,.22)';
+          g.fillStyle = P.shade;
           g.beginPath();
           const a = this.shade.a, b = this.shade.b, n = 300;
           g.moveTo(X(a), Y(0));
@@ -367,9 +369,9 @@
       this.tag.textContent = '';
       const cross = (x, y, col) => {
         const px = X(x), py = Y(y);
-        g.strokeStyle = col || '#000'; g.lineWidth = 1;
+        g.strokeStyle = col || App.pal().axis; g.lineWidth = 1;
         g.beginPath(); g.moveTo(px - 6, py); g.lineTo(px + 6, py); g.moveTo(px, py - 6); g.lineTo(px, py + 6); g.stroke();
-        g.beginPath(); g.arc(px, py, 2.2, 0, 2 * Math.PI); g.fillStyle = col || '#000'; g.fill();
+        g.beginPath(); g.arc(px, py, 2.2, 0, 2 * Math.PI); g.fillStyle = col || App.pal().axis; g.fill();
       };
       const inf = (...parts) => parts.forEach(p => this.info.appendChild(typeof p === 'string' ? h('span', { text: p }) : p));
       if (this.trace) {
@@ -388,7 +390,7 @@
         const v = (this.vis || []).find(q => q.i === this.gs.i);
         this.tag.textContent = (v ? v.name + '  ' : '') + this.gs.label;
         if (r) {
-          cross(r.x, r.y, v ? v.color : '#000');
+          cross(r.x, r.y, v ? v.color : App.pal().axis);
           if (r.val !== undefined) inf(h('b', { text: this.gs.label === '∫dx' ? '∫dx=' : this.gs.label + '=' }), fmt(r.val, 10));
           else inf(h('b', { text: 'x=' }), fmt(r.x, 10), h('b', { text: 'y=' }), fmt(r.y, 10));
           if (this.gs.list.length > 1) inf('(' + (this.gs.k + 1) + '/' + this.gs.list.length + ' ◀▶)');
@@ -396,7 +398,7 @@
       }
       if (this.boxRect) {
         const b = this.boxRect;
-        g.strokeStyle = '#000'; g.setLineDash([3, 3]); g.lineWidth = 1;
+        g.strokeStyle = App.pal().axis; g.setLineDash([3, 3]); g.lineWidth = 1;
         g.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
         g.setLineDash([]);
       }
@@ -517,7 +519,7 @@
       App.dialog({
         title: 'View Window',
         body: [f('vw-xmin', 'xmin', V.xmin), f('vw-xmax', 'xmax', V.xmax), f('vw-xscl', 'xscale', V.xscl), f('vw-ymin', 'ymin', V.ymin), f('vw-ymax', 'ymax', V.ymax), f('vw-yscl', 'yscale', V.yscl),
-          h('div', { style: 'margin:6px 0 2px;color:#555', text: 'r= Graphen (θ)' }), f('vw-tmin', 'tθmin', V.tmin), f('vw-tmax', 'tθmax', V.tmax), f('vw-tst', 'tθstep', V.tstep)],
+          h('div', { class: 'note', text: 'r= Graphen (θ)' }), f('vw-tmin', 'tθmin', V.tmin), f('vw-tmax', 'tθmax', V.tmax), f('vw-tst', 'tθstep', V.tstep)],
         buttons: [{ label: 'Default', action: () => { Object.assign(this.view, DEFAULT_VIEW()); this.draw(); } }],
         ok: d => {
           const g = id => evalNum(d.querySelector('#' + id).value);
@@ -682,7 +684,7 @@
       tb.appendChild(body);
       this.tEl.textContent = '';
       this.tEl.appendChild(tb);
-      if (!vis.length) this.tEl.appendChild(h('div', { style: 'padding:8px;color:#666', text: 'Keine y=-Funktion ausgewählt.' }));
+      if (!vis.length) this.tEl.appendChild(h('div', { class: 'empty', text: 'Keine y=-Funktion ausgewählt.' }));
     },
     tableInput() {
       const T = this.table;

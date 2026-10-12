@@ -17,7 +17,9 @@
     'dotP', 'crossP', 'dot', 'cross', 'norm', 'mean', 'median', 'max', 'min', 'define', 're', 'im', 'arg',
     'conjg', 'realpart', 'imagpart', 'partfrac', 'propFrac', 'erf', 'Si', 'Ci', 'Ei', 'constn', 'identity',
     'dim', 'seq', 'sortA', 'sortD', 'numerator', 'denominator', 'matrix', 'determinant', 'tExpand', 'gamma',
-    'rand', 'randint', 'fMax', 'fMin', 'variance', 'stdDev'
+    'rand', 'randint', 'fMax', 'fMin', 'variance', 'stdDev',
+    'normPDf', 'normCDf', 'invNormCDf', 'binomialPDf', 'binomialCDf', 'poissonPDf', 'poissonCDf', 'geoPDf', 'geoCDf',
+    'tPDf', 'tCDf', 'chiPDf', 'chiCDf', 'fPDf', 'fCDf', 'invTCDf', 'invChiCDf', 'invFCDf', 'invBinomialCDf', 'invPoissonCDf', 'invGeoCDf'
   ]);
   // Befehle, die wie ClassPad mit "(" eingetippt automatisch zu einem Funktions-Token werden
   const AUTO_FN = [
@@ -26,7 +28,9 @@
     'integrate', 'lim', 'limit', 'sum', 'prod', 'product', 'det', 'trn', 'mean', 'median', 'max', 'min',
     'define', 'nCr', 'nPr', 'gcd', 'lcm', 'mod', 'floor', 'ceil', 'round', 'int', 'frac', 'sign', 're',
     'im', 'arg', 'conjg', 'partfrac', 'propFrac', 'dotP', 'crossP', 'norm', 'seq', 'sortA', 'sortD', 'dim',
-    'erf', 'fMax', 'fMin', 'variance', 'stdDev', 'iPart', 'fPart', 'gamma', 'rand', 'randint'
+    'erf', 'fMax', 'fMin', 'variance', 'stdDev', 'iPart', 'fPart', 'gamma', 'rand', 'randint',
+    'normPDf', 'normCDf', 'invNormCDf', 'binomialPDf', 'binomialCDf', 'poissonPDf', 'poissonCDf', 'geoPDf', 'geoCDf',
+    'tPDf', 'tCDf', 'chiPDf', 'chiCDf', 'fPDf', 'fCDf', 'invTCDf', 'invChiCDf', 'invFCDf', 'invBinomialCDf', 'invPoissonCDf', 'invGeoCDf'
   ].sort((a, b) => b.length - a.length);
 
   const REL = new Set(['=', '≠', '<', '>', '≤', '≥']);

@@ -41,6 +41,12 @@ const T = [
   // Komplex, Matrizen, Listen
   ['(2+3i)(1-i)', '5+i'], ['(1+i)/(1-i)', 'i'], ['abs(3+4i)', '5'], ['e^(i*pi)', '-1'], ['sqrt(-4)', 'ERR: Non-Real in Calc'],
   ['det([[1,2][3,4]])', '-2'], ['trn([[1,2][3,4]])', '[[1,3][2,4]]'], ['{1,2,3}*2', '{2,4,6}'], ['mean({1,2,3,4})', '(5)/(2)'], ['median({3,1,2})', '2'],
+  // Verteilungen (Referenzwerte aus Tabellen; Inverse wie am ClassPad: t, χ², F mit rechtem Ende)
+  ['normPDf(0)', '0.3989422804'], ['normCDf(-1.96,1.96,1,0)', '0.9500042097'], ['normCDf(-Infinity,0)', '0.5'], ['invNormCDf(0.975)', '1.959963985'],
+  ['invNormCDf(0.5,15,100)', '100'], ['binomialPDf(3,10,0.5)', '0.1171875'], ['binomialCDf(0,3,10,0.5)', '0.171875'], ['poissonPDf(2,3)', '0.2240418077'],
+  ['poissonCDf(0,2,3)', '0.4231900811'], ['geoPDf(3,0.2)', '0.128'], ['tCDf(-2.228,2.228,10)', '0.9499882282'], ['chiCDf(0,3.841,1)', '0.9499863162'],
+  ['invTCDf(0.025,10)', '2.228138852'], ['invChiCDf(0.05,1)', '3.841458821'], ['invFCDf(0.05,5,10)', '3.32583453'], ['invBinomialCDf(0.5,10,0.5)', '5'],
+  ['invPoissonCDf(0.9,3)', '5'], ['invGeoCDf(0.5,0.2)', '4'],
   // Fehler
   ['1/0', 'Undefined'], ['3+*4', 'ERR: Syntax ERROR'],
   // Variablen und Funktionen (Reihenfolge wichtig)

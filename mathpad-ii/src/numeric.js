@@ -29,6 +29,107 @@
     const y = 1 - t * Math.exp(-x * x - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
     return s * y;
   }
+  /* ---------- Verteilungen (ClassPad: normCDf, binomialPDf, tCDf …) ---------- */
+  function lgamma(x) {
+    const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+    let y = x, t = x + 5.5;
+    t -= (x + 0.5) * Math.log(t);
+    let ser = 1.000000000190015;
+    for (let j = 0; j < 6; j++) ser += c[j] / ++y;
+    return -t + Math.log(2.5066282746310005 * ser / x);
+  }
+  // regularisierte unvollstaendige Gammafunktion P(a, x)
+  function gammaP(a, x) {
+    if (x <= 0) return 0;
+    if (!isFinite(x)) return 1;
+    const gln = lgamma(a);
+    if (x < a + 1) {
+      let ap = a, sum = 1 / a, del = sum;
+      for (let n = 0; n < 500; n++) { ap++; del *= x / ap; sum += del; if (Math.abs(del) < Math.abs(sum) * 1e-16) break; }
+      return sum * Math.exp(-x + a * Math.log(x) - gln);
+    }
+    let b = x + 1 - a, c = 1 / 1e-300, d = 1 / b, hh = d;
+    for (let i = 1; i < 500; i++) {
+      const an = -i * (i - a);
+      b += 2;
+      d = an * d + b; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = b + an / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d;
+      const del = d * c;
+      hh *= del;
+      if (Math.abs(del - 1) < 1e-16) break;
+    }
+    return 1 - Math.exp(-x + a * Math.log(x) - gln) * hh;
+  }
+  // regularisierte unvollstaendige Betafunktion I_x(a, b)
+  function betaI(x, a, b) {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    const bt = Math.exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+    const cf = (x, a, b) => {
+      const qab = a + b, qap = a + 1, qam = a - 1;
+      let c = 1, d = 1 - qab * x / qap;
+      if (Math.abs(d) < 1e-300) d = 1e-300;
+      d = 1 / d;
+      let hh = d;
+      for (let m = 1; m <= 500; m++) {
+        const m2 = 2 * m;
+        let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+        d = 1 + aa * d; if (Math.abs(d) < 1e-300) d = 1e-300;
+        c = 1 + aa / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+        d = 1 / d; hh *= d * c;
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+        d = 1 + aa * d; if (Math.abs(d) < 1e-300) d = 1e-300;
+        c = 1 + aa / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+        d = 1 / d;
+        const del = d * c;
+        hh *= del;
+        if (Math.abs(del - 1) < 1e-16) break;
+      }
+      return hh;
+    };
+    return x < (a + 1) / (a + b + 2) ? bt * cf(x, a, b) / a : 1 - bt * cf(1 - x, b, a) / b;
+  }
+  const normCdfStd = z => (z < 0 ? 0.5 * (1 - gammaP(0.5, z * z / 2)) : 0.5 * (1 + gammaP(0.5, z * z / 2)));
+  const D = {
+    normPDf: (x, s = 1, m = 0) => Math.exp(-((x - m) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI)),
+    normCDf: (lo, hi, s = 1, m = 0) => normCdfStd((hi - m) / s) - normCdfStd((lo - m) / s),
+    invNormCDf: (p, s = 1, m = 0) => {
+      if (!(p > 0 && p < 1)) return p === 0 ? -Infinity : p === 1 ? Infinity : NaN;
+      // Acklam-Startwert, dann Newton auf der genauen Verteilungsfunktion
+      const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.383577518672690e2, -3.066479806614716e1, 2.506628277459239];
+      const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+      const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+      const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
+      let z;
+      if (p < 0.02425) { const q = Math.sqrt(-2 * Math.log(p)); z = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+      else if (p > 1 - 0.02425) { const q = Math.sqrt(-2 * Math.log(1 - p)); z = -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+      else { const q = p - 0.5, r = q * q; z = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1); }
+      for (let i = 0; i < 3; i++) z -= (normCdfStd(z) - p) / (Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI));
+      return m + s * z;
+    },
+    binomialPDf: (x, n, p) => (Number.isInteger(x) && x >= 0 && x <= n ? Math.exp(lgamma(n + 1) - lgamma(x + 1) - lgamma(n - x + 1) + x * Math.log(p) + (n - x) * Math.log(1 - p)) : 0),
+    binomialCDf: (lo, hi, n, p) => { let s = 0; for (let k = Math.max(0, Math.ceil(lo)); k <= Math.min(n, Math.floor(hi)); k++) s += D.binomialPDf(k, n, p); return s; },
+    poissonPDf: (x, l) => (Number.isInteger(x) && x >= 0 ? Math.exp(-l + x * Math.log(l) - lgamma(x + 1)) : 0),
+    poissonCDf: (lo, hi, l) => { let s = 0; const top = isFinite(hi) ? Math.floor(hi) : Math.ceil(l + 40 * Math.sqrt(l) + 50); for (let k = Math.max(0, Math.ceil(lo)); k <= top; k++) s += D.poissonPDf(k, l); return s; },
+    geoPDf: (x, p) => (Number.isInteger(x) && x >= 1 ? p * Math.pow(1 - p, x - 1) : 0),
+    geoCDf: (lo, hi, p) => { const F = k => (k < 1 ? 0 : 1 - Math.pow(1 - p, Math.floor(k))); return F(hi) - F(Math.ceil(lo) - 1); },
+    tPDf: (x, v) => Math.exp(lgamma((v + 1) / 2) - lgamma(v / 2)) / Math.sqrt(v * Math.PI) * Math.pow(1 + x * x / v, -(v + 1) / 2),
+    tCDf: (lo, hi, v) => { const F = t => (!isFinite(t) ? (t > 0 ? 1 : 0) : t >= 0 ? 1 - 0.5 * betaI(v / (v + t * t), v / 2, 0.5) : 0.5 * betaI(v / (v + t * t), v / 2, 0.5)); return F(hi) - F(lo); },
+    chiPDf: (x, v) => (x <= 0 ? 0 : Math.exp((v / 2 - 1) * Math.log(x) - x / 2 - (v / 2) * Math.log(2) - lgamma(v / 2))),
+    chiCDf: (lo, hi, v) => gammaP(v / 2, Math.max(0, hi) / 2) - gammaP(v / 2, Math.max(0, lo) / 2),
+    fPDf: (x, n, d) => (x <= 0 ? 0 : Math.exp(0.5 * (n * Math.log(n * x) + d * Math.log(d) - (n + d) * Math.log(n * x + d)) - Math.log(x) - (lgamma(n / 2) + lgamma(d / 2) - lgamma((n + d) / 2)))),
+    fCDf: (lo, hi, n, d) => { const F = x => (x <= 0 ? 0 : !isFinite(x) ? 1 : betaI(n * x / (n * x + d), n / 2, d / 2)); return F(hi) - F(lo); },
+    // Inverse wie am ClassPad: invTCDf, invChiCDf, invFCDf liefern die untere Grenze x mit P(X ≥ x) = prob (rechtes Ende)
+    invTCDf: (p, v) => { let lo = -1e4, hi = 1e4; for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (D.tCDf(m, Infinity, v) > p) lo = m; else hi = m; } return (lo + hi) / 2; },
+    invChiCDf: (p, v) => { let lo = 0, hi = 1e5; for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (D.chiCDf(m, Infinity, v) > p) lo = m; else hi = m; } return (lo + hi) / 2; },
+    invFCDf: (p, n, d) => { let lo = 0, hi = 1e6; for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (D.fCDf(m, Infinity, n, d) > p) lo = m; else hi = m; } return (lo + hi) / 2; },
+    // Diskrete Inverse: kleinstes x mit P(X ≤ x) ≥ prob
+    invBinomialCDf: (p, n, q) => { let s = 0; for (let k = 0; k <= n; k++) { s += D.binomialPDf(k, n, q); if (s >= p * (1 - 1e-12)) return k; } return n; },
+    invPoissonCDf: (p, l) => { let s = 0; for (let k = 0; k < 1e6; k++) { s += D.poissonPDf(k, l); if (s >= p * (1 - 1e-12)) return k; } return NaN; },
+    invGeoCDf: (p, q) => (p <= 0 ? 1 : Math.max(1, Math.ceil(Math.log(1 - p) / Math.log(1 - q) - 1e-9)))
+  };
+
   function nCr(n, r) { if (r < 0 || r > n) return 0; let x = 1; for (let i = 1; i <= r; i++) x = x * (n - r + i) / i; return Math.round(x); }
   function nPr(n, r) { if (r < 0 || r > n) return 0; let x = 1; for (let i = 0; i < r; i++) x *= n - i; return x; }
   function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) [a, b] = [b, a % b]; return a; }
@@ -137,6 +238,7 @@
         case 'min': return x => Math.min(...A.map(g => g(x)));
         case 'constn': return () => 0;
       }
+      if (D[name]) { const fn = D[name]; return x => fn(...A.map(g => g(x))); }
       throw new C.MathError('Wrong Argument Type');
     }
     const f = c(ast);
@@ -406,5 +508,5 @@
     return { type, formula, params, f };
   }
 
-  MP.num = { compile, roots, extrema, integrate, derivative, derivative2, golden, bisect, solveNear, oneVar, regression, factorial, gamma, erf, nCr, nPr, polyFit, corr };
+  MP.num = { DIST: D, gammaP, betaI, lgamma, compile, roots, extrema, integrate, derivative, derivative2, golden, bisect, solveNear, oneVar, regression, factorial, gamma, erf, nCr, nPr, polyFit, corr };
 })(typeof window !== 'undefined' ? (window.MP = window.MP || {}) : (globalThis.MP = globalThis.MP || {}));

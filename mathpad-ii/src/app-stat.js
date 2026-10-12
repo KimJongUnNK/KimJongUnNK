@@ -279,13 +279,14 @@
       cv.width = Math.round(W * r); cv.height = Math.round(H * r);
       const g = cv.getContext('2d');
       g.setTransform(r, 0, 0, r, 0, 0);
-      g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+      const P = App.pal();
+      g.fillStyle = P.bg; g.fillRect(0, 0, W, H);
       this.info.textContent = '';
       const t = this.sg.type;
       const xs = this.lists[this.sg.x], ys = this.lists[this.sg.y];
       const fr = this.sg.f >= 0 ? this.lists[this.sg.f] : null;
       if (!xs.length || ((t === 'scatter' || t === 'xyline') && ys.length !== xs.length)) {
-        g.fillStyle = '#666'; g.font = '11px Helvetica, Arial, sans-serif';
+        g.fillStyle = P.mute; g.font = '11px -apple-system, Helvetica, Arial, sans-serif';
         g.fillText('Keine passenden Daten in list' + (this.sg.x + 1) + (t === 'scatter' || t === 'xyline' ? '/list' + (this.sg.y + 1) : ''), 8, 18);
         return;
       }
@@ -306,14 +307,14 @@
       if (t !== 'hist') { xmin -= px; xmax += px; }
       if (t === 'scatter' || t === 'xyline') { ymin -= py; ymax += py; }
       const X = x => (x - xmin) / (xmax - xmin) * W, Y = y => H - (y - ymin) / (ymax - ymin) * H;
-      g.strokeStyle = '#000'; g.lineWidth = 1;
+      g.strokeStyle = P.axis; g.lineWidth = 1;
       g.beginPath();
       if (ymin <= 0 && ymax >= 0) { g.moveTo(0, Math.round(Y(0)) + 0.5); g.lineTo(W, Math.round(Y(0)) + 0.5); }
       if (xmin <= 0 && xmax >= 0 && t !== 'box') { g.moveTo(Math.round(X(0)) + 0.5, 0); g.lineTo(Math.round(X(0)) + 0.5, H); }
       g.stroke();
-      g.fillStyle = '#555'; g.font = '9px Helvetica, Arial, sans-serif';
+      g.fillStyle = P.label; g.font = '9px -apple-system, Helvetica, Arial, sans-serif';
       g.fillText(fmt(xmin, 4) + ' … ' + fmt(xmax, 4), 4, H - 4);
-      const col = '#1a4fd8';
+      const col = P.curves[0];
       if (t === 'scatter' || t === 'xyline') {
         g.fillStyle = col; g.strokeStyle = col;
         if (t === 'xyline') {
@@ -322,7 +323,7 @@
         }
         xs.forEach((x, i) => { g.fillRect(Math.round(X(x)) - 2, Math.round(Y(ys[i])) - 2, 4, 4); });
         if (this.reg) {
-          g.strokeStyle = '#e0201b'; g.lineWidth = 1.5; g.beginPath();
+          g.strokeStyle = P.curves[1]; g.lineWidth = 1.5; g.beginPath();
           let pen = false;
           for (let k = 0; k <= W * 2; k++) {
             const x = xmin + (xmax - xmin) * k / (W * 2), y = this.reg.f(x);
@@ -335,7 +336,7 @@
           this.info.appendChild(h('span', { text: this.reg.label + ': y=' + this.reg.formula.replace(/\*/g, '·').replace(/\+\(-/g, '−(').slice(0, 60) }));
         }
       } else if (t === 'hist') {
-        g.fillStyle = 'rgba(26,79,216,.25)'; g.strokeStyle = col;
+        g.fillStyle = P.hist; g.strokeStyle = col;
         bins.c.forEach((c, i) => {
           const x0 = X(bins.lo + i * bins.wdt), x1 = X(bins.lo + (i + 1) * bins.wdt);
           g.fillRect(x0, Y(c), x1 - x0, Y(0) - Y(c));
