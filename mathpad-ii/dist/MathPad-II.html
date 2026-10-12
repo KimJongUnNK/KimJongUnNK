@@ -238,6 +238,11 @@ button { font: inherit; color: inherit; }
   .seg button span { display: none; }
   .seg button { padding: 0 10px; }
 }
+@media (max-height: 520px) {
+  .titlebar { height: 40px; }
+  .brand small { display: none; }
+  .help { top: calc(48px + env(safe-area-inset-top)); }
+}
 @media (max-width: 560px) {
   .titlebar { padding: 0 10px; gap: 8px; }
   .brand div { display: none; }
@@ -262,8 +267,7 @@ button { font: inherit; color: inherit; }
 }
 .screen.off > * { visibility: hidden; }
 .screen.off { background: #0f1113; }
-/* Rotate: Inhalt quer, das ganze Geraet wird gedreht wie in der Hand */
-.screen.rot { position: absolute; width: 528px; height: 320px; left: -104px; top: 104px; transform: rotate(90deg); }
+
 
 .ipanel { position: absolute; left: 68px; top: 619px; width: 320px; height: 52px; display: grid; grid-template-columns: repeat(7, 1fr); }
 .ipanel button {
@@ -305,6 +309,22 @@ button { font: inherit; color: inherit; }
 .kgrid { position: absolute; left: 0; right: 0; display: grid; column-gap: 10px; row-gap: 20px; }
 .kgrid.r6 { top: 103px; grid-template-columns: repeat(6, 1fr); }
 .kgrid.r5 { top: 151px; grid-template-columns: .82fr 1fr 1fr 1fr .82fr; }
+
+/* ---------- Querformat (Rotate): eigenes Gehaeuse, Display links, Tastenfeld rechts, alles aufrecht ----------
+   Die Masse sind das Hochformat um 90 Grad getauscht (1052 x 456); Glas, Display und Icon-Leiste behalten
+   ihre Abstaende, das Tastenfeld (372 x 323) wandert unveraendert neben das Display. */
+.device.land { width: 1052px; height: 456px; border-radius: 34px; }
+.device.land .dev-logo { left: 636px; right: 44px; top: 46px; padding-left: .2em; }
+.device.land .glass { left: 36px; top: 28px; width: 564px; height: 400px; }
+.device.land .screen-wrap { left: 54px; top: 41px; width: 528px; height: 320px; }
+.device.land .screen { width: 528px; height: 320px; }
+.device.land .ipanel { left: 54px; top: 367px; width: 528px; }
+.device.land .keys { left: 636px; right: 44px; top: 88px; bottom: 45px; }
+.device.land .softkb { height: 176px; }
+.device.land .softkb .pad { gap: 3px; padding: 3px; }
+.device.land .softkb .pad button .m { font-size: 11px; }
+.device.land .dlg { max-height: 300px; }
+.device.land .ddmenu { max-height: 290px; }
 
 /* ==========================================================================
    Bildschirm-Inhalt — Aufbau wie am ClassPad, Oberflaeche wie macOS/iOS
@@ -430,10 +450,10 @@ button { font: inherit; color: inherit; }
 .softkb .tabs { display: flex; margin: 4px 4px 1px; height: 19px; padding: 1.5px; border-radius: 7px; background: var(--ctl); }
 .softkb .tabs button { flex: 1; background: none; border: 0; font-size: 10.5px; font-weight: 500; cursor: pointer; color: var(--lcd-ink); border-radius: 5.5px; padding: 0; transition: background-color .2s; }
 .softkb .tabs button.on { background: var(--ctl-thumb); box-shadow: var(--ctl-thumb-shadow); font-weight: 600; }
-.softkb .pad { flex: 1; display: grid; gap: 4px 3px; padding: 4px 3px 4px; grid-auto-rows: 1fr; }
+.softkb .pad { flex: 1; min-height: 0; display: grid; gap: 4px 3px; padding: 4px 3px 4px; grid-auto-rows: minmax(0, 1fr); }
 .softkb .pad button {
   border: 0; border-radius: 5px; background: var(--kb-key); box-shadow: var(--kb-shadow); cursor: pointer; font: 12.5px var(--font-lcd);
-  color: var(--kb-ink); padding: 0; min-width: 0; overflow: hidden; white-space: nowrap; display: flex; align-items: center; justify-content: center;
+  color: var(--kb-ink); padding: 0; min-width: 0; min-height: 0; overflow: hidden; white-space: nowrap; display: flex; align-items: center; justify-content: center;
 }
 .softkb .pad button:active { background: var(--kb-key-2); }
 .softkb .pad button .m { font-size: 12px; pointer-events: none; }
@@ -4001,11 +4021,10 @@ decimal.js/decimal.js:
   }
   function buildKeys() {
     const dp = h('div', { class: 'dpad' });
-    // Gedrehtes Geraet: die Pfeile zeigen in die neue Richtung, also umsetzen (wie am ClassPad)
-    const ROT = { UP: 'LEFT', LEFT: 'DOWN', DOWN: 'RIGHT', RIGHT: 'UP' };
+    // Im Querformat steht das Tastenfeld aufrecht neben dem Display, die Pfeile gelten unveraendert
     [['up', 'UP', '▲'], ['dn', 'DOWN', '▼'], ['lf', 'LEFT', '◀'], ['rt', 'RIGHT', '▶']].forEach(([c, k, t]) => {
       const b = h('button', { type: 'button', class: c, 'data-k': k, 'aria-label': k.toLowerCase(), text: t });
-      bindPress(b, () => press(App.land ? ROT[k] : k));
+      bindPress(b, () => press(k));
       keyEls[k] = b;
       dp.appendChild(b);
     });
@@ -4110,14 +4129,14 @@ decimal.js/decimal.js:
       case 'main': App.open('main'); break;
       case 'resize': if (App.cur.resize) App.cur.resize(); break;
       case 'swap': if (App.cur.swap) App.cur.swap(); break;
-      case 'rotate': App.rotate(); break;
+      case 'rotate': App.rotate(true); break;
       case 'esc': if (!closeDialog()) press('ESC'); break;
     }
   }
   function settingsMenu() {
     const el = document.querySelector('.ipanel [data-icon="settings"]');
     const r = el.getBoundingClientRect(), sr = document.getElementById('screen').getBoundingClientRect();
-    openMenu(App.setupItems(), App.land ? { x: 4, y: 316, up: true } : { x: (r.left - sr.left) / App.scale, y: 524, up: true });
+    openMenu(App.setupItems(), { x: (r.left - sr.left) / App.scale, y: (App.land ? 320 : 528) - 4, up: true });
   }
 
   /* ---------- Menues ---------- */
@@ -4516,16 +4535,29 @@ decimal.js/decimal.js:
     App.refreshChrome();
     if (App.cur && App.cur.refresh) App.cur.refresh();
   };
-  App.rotate = function () {
-    App.land = !App.land;
-    applyRotation();
-    App.fit();
-    if (App.cur && App.cur.layout) App.cur.layout();
-    App.refreshChrome();
+  // Rotate: eigenes Querformat-Gehaeuse (Display links, Tastenfeld rechts), alles aufrecht
+  App.rotate = function (animate) {
+    const flip = () => {
+      App.land = !App.land;
+      applyRotation();
+      App.fit();
+      if (App.cur && App.cur.layout) App.cur.layout();
+      App.refreshChrome();
+    };
+    const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (animate !== false && !calm && document.startViewTransition) document.startViewTransition(flip);
+    else flip();
     App.save();
   };
   function applyRotation() {
-    document.getElementById('screen').classList.toggle('rot', App.land);
+    document.getElementById('device').classList.toggle('land', App.land);
+  }
+  // iPhone und iPad: das Geraet folgt dem Drehen in der Hand (am Mac bleibt es beim Rotate-Knopf)
+  const mqTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  const mqLand = window.matchMedia ? window.matchMedia('(orientation: landscape)') : null;
+  function followOrientation(animate) {
+    if (!mqTouch || !mqTouch.matches || !mqLand) return;
+    if (mqLand.matches !== App.land) App.rotate(animate);
   }
 
   /* ---------- Erscheinungsbild umschalten ---------- */
@@ -4608,14 +4640,13 @@ decimal.js/decimal.js:
   App.zoom = 0;
   App.fit = function () {
     const stage = document.getElementById('stage'), fit = document.getElementById('fit'), dev = document.getElementById('device');
-    const w = dev.offsetWidth, hgt = dev.offsetHeight;
-    const W = App.land ? hgt : w, H = App.land ? w : hgt;
+    const W = dev.offsetWidth, H = dev.offsetHeight;
     // verfuegbare Flaeche: Buehne unter der Titelleiste, abzueglich Rand
     const aw = (stage.clientWidth || window.innerWidth) - 32, ah = (stage.clientHeight || window.innerHeight) - 32;
     const fitS = Math.max(0.3, Math.min(aw / W, ah / H, 2));
     const s = App.zoom ? App.zoom : fitS;
     App.scale = s;
-    dev.style.transform = App.land ? 'translate(0,' + (w * s) + 'px) rotate(-90deg) scale(' + s + ')' : 'scale(' + s + ')';
+    dev.style.transform = 'scale(' + s + ')';
     fit.style.width = W * s + 'px';
     fit.style.height = H * s + 'px';
     const zv = document.getElementById('zoom-val');
@@ -4719,8 +4750,10 @@ decimal.js/decimal.js:
     applyRotation();
     bindChrome();
     App.open(saved && App.apps[saved.cur] ? saved.cur : 'main');
+    followOrientation(false);
     App.fit();
     window.addEventListener('resize', App.fit);
+    if (mqLand) { const onTurn = () => followOrientation(true); if (mqLand.addEventListener) mqLand.addEventListener('change', onTurn); else if (mqLand.addListener) mqLand.addListener(onTurn); }
     // Tab schliessen oder Seite neu laden: sofort speichern
     window.addEventListener('pagehide', saveNow);
     document.addEventListener('keydown', onKeyDown);

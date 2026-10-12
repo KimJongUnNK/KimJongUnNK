@@ -182,11 +182,10 @@
   }
   function buildKeys() {
     const dp = h('div', { class: 'dpad' });
-    // Gedrehtes Geraet: die Pfeile zeigen in die neue Richtung, also umsetzen (wie am ClassPad)
-    const ROT = { UP: 'LEFT', LEFT: 'DOWN', DOWN: 'RIGHT', RIGHT: 'UP' };
+    // Im Querformat steht das Tastenfeld aufrecht neben dem Display, die Pfeile gelten unveraendert
     [['up', 'UP', '▲'], ['dn', 'DOWN', '▼'], ['lf', 'LEFT', '◀'], ['rt', 'RIGHT', '▶']].forEach(([c, k, t]) => {
       const b = h('button', { type: 'button', class: c, 'data-k': k, 'aria-label': k.toLowerCase(), text: t });
-      bindPress(b, () => press(App.land ? ROT[k] : k));
+      bindPress(b, () => press(k));
       keyEls[k] = b;
       dp.appendChild(b);
     });
@@ -291,14 +290,14 @@
       case 'main': App.open('main'); break;
       case 'resize': if (App.cur.resize) App.cur.resize(); break;
       case 'swap': if (App.cur.swap) App.cur.swap(); break;
-      case 'rotate': App.rotate(); break;
+      case 'rotate': App.rotate(true); break;
       case 'esc': if (!closeDialog()) press('ESC'); break;
     }
   }
   function settingsMenu() {
     const el = document.querySelector('.ipanel [data-icon="settings"]');
     const r = el.getBoundingClientRect(), sr = document.getElementById('screen').getBoundingClientRect();
-    openMenu(App.setupItems(), App.land ? { x: 4, y: 316, up: true } : { x: (r.left - sr.left) / App.scale, y: 524, up: true });
+    openMenu(App.setupItems(), { x: (r.left - sr.left) / App.scale, y: (App.land ? 320 : 528) - 4, up: true });
   }
 
   /* ---------- Menues ---------- */
@@ -697,16 +696,29 @@
     App.refreshChrome();
     if (App.cur && App.cur.refresh) App.cur.refresh();
   };
-  App.rotate = function () {
-    App.land = !App.land;
-    applyRotation();
-    App.fit();
-    if (App.cur && App.cur.layout) App.cur.layout();
-    App.refreshChrome();
+  // Rotate: eigenes Querformat-Gehaeuse (Display links, Tastenfeld rechts), alles aufrecht
+  App.rotate = function (animate) {
+    const flip = () => {
+      App.land = !App.land;
+      applyRotation();
+      App.fit();
+      if (App.cur && App.cur.layout) App.cur.layout();
+      App.refreshChrome();
+    };
+    const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (animate !== false && !calm && document.startViewTransition) document.startViewTransition(flip);
+    else flip();
     App.save();
   };
   function applyRotation() {
-    document.getElementById('screen').classList.toggle('rot', App.land);
+    document.getElementById('device').classList.toggle('land', App.land);
+  }
+  // iPhone und iPad: das Geraet folgt dem Drehen in der Hand (am Mac bleibt es beim Rotate-Knopf)
+  const mqTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  const mqLand = window.matchMedia ? window.matchMedia('(orientation: landscape)') : null;
+  function followOrientation(animate) {
+    if (!mqTouch || !mqTouch.matches || !mqLand) return;
+    if (mqLand.matches !== App.land) App.rotate(animate);
   }
 
   /* ---------- Erscheinungsbild umschalten ---------- */
@@ -789,14 +801,13 @@
   App.zoom = 0;
   App.fit = function () {
     const stage = document.getElementById('stage'), fit = document.getElementById('fit'), dev = document.getElementById('device');
-    const w = dev.offsetWidth, hgt = dev.offsetHeight;
-    const W = App.land ? hgt : w, H = App.land ? w : hgt;
+    const W = dev.offsetWidth, H = dev.offsetHeight;
     // verfuegbare Flaeche: Buehne unter der Titelleiste, abzueglich Rand
     const aw = (stage.clientWidth || window.innerWidth) - 32, ah = (stage.clientHeight || window.innerHeight) - 32;
     const fitS = Math.max(0.3, Math.min(aw / W, ah / H, 2));
     const s = App.zoom ? App.zoom : fitS;
     App.scale = s;
-    dev.style.transform = App.land ? 'translate(0,' + (w * s) + 'px) rotate(-90deg) scale(' + s + ')' : 'scale(' + s + ')';
+    dev.style.transform = 'scale(' + s + ')';
     fit.style.width = W * s + 'px';
     fit.style.height = H * s + 'px';
     const zv = document.getElementById('zoom-val');
@@ -900,8 +911,10 @@
     applyRotation();
     bindChrome();
     App.open(saved && App.apps[saved.cur] ? saved.cur : 'main');
+    followOrientation(false);
     App.fit();
     window.addEventListener('resize', App.fit);
+    if (mqLand) { const onTurn = () => followOrientation(true); if (mqLand.addEventListener) mqLand.addEventListener('change', onTurn); else if (mqLand.addListener) mqLand.addListener(onTurn); }
     // Tab schliessen oder Seite neu laden: sofort speichern
     window.addEventListener('pagehide', saveNow);
     document.addEventListener('keydown', onKeyDown);

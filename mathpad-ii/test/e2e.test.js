@@ -136,12 +136,23 @@ async function run(viewport, fn) {
   ok('Formel kopiert', /y\d+/.test(msg), msg);
   await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
   // 13) Rotate über Icon
-  const l0 = await page.$eval('#screen', e => e.classList.contains('rot'));
-  await page.click('.ipanel [data-icon="rotate"]');
-  ok('Rotate wechselt Ausrichtung', l0 !== await page.$eval('#screen', e => e.classList.contains('rot')));
+  const l0 = await page.$eval('#device', e => e.classList.contains('land'));
+  await page.click('.ipanel [data-icon="rotate"]'); await page.waitForTimeout(600);
+  ok('Rotate wechselt Ausrichtung', l0 !== await page.$eval('#device', e => e.classList.contains('land')));
   const fb = await page.$eval('#fit', e => [e.offsetWidth, e.offsetHeight]);
-  ok('Rotate: Gerät liegt quer', fb[0] > fb[1], fb);
-  await page.click('.ipanel [data-icon="rotate"]');
+  ok('Rotate: Gerät liegt quer', fb[0] > fb[1] * 2, fb);
+  // echtes Querformat: Display links, Tastenfeld rechts daneben, nichts gedreht
+  const geo = await page.evaluate(() => {
+    const r = s => document.querySelector(s).getBoundingClientRect();
+    const sc = r('#screen'), k7 = r('[data-k="7"]'), k8 = r('[data-k="8"]');
+    return { screenWide: sc.width > sc.height * 1.5, keysRight: k7.left > sc.right, rowUpright: Math.abs(k7.top - k8.top) < 1 && k8.left > k7.left, noRotate: getComputedStyle(document.getElementById('screen')).transform === 'none' };
+  });
+  ok('Querformat: Display breit, Tasten rechts und aufrecht', geo.screenWide && geo.keysRight && geo.rowUpright && geo.noRotate, geo);
+  await page.click('[data-k="KEYBOARD"]'); await page.waitForTimeout(150);
+  const kbFit = await page.evaluate(() => { const pad = document.querySelector('.softkb .pad').getBoundingClientRect(); const bs = [...document.querySelectorAll('.softkb .pad button')]; return bs.every(b => b.getBoundingClientRect().bottom <= pad.bottom + 1); });
+  ok('Querformat: Soft-Keyboard komplett sichtbar', kbFit);
+  await page.click('[data-k="KEYBOARD"]');
+  await page.click('.ipanel [data-icon="rotate"]'); await page.waitForTimeout(600);
   // Enter nach Klick auf eine Taste = EXE, nicht die Taste nochmal
   await page.click('.ipanel [data-icon="main"]');
   await page.keyboard.press('Alt+Backspace');
@@ -307,6 +318,21 @@ async function run(viewport, fn) {
     for (const a of ['Sequence', 'Conics', 'DiffEqGraph', '3D Graph']) await open(a);
     ok('Grafik-Apps geöffnet', (await page.evaluate(() => MP.App.curName)) === 'g3d');
   });
+  // iPhone/iPad: das Gerät folgt dem Drehen
+  {
+    const browser = await chromium.launch();
+    const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
+    const errs = []; page.on('pageerror', e => errs.push(e.message));
+    await page.goto(FILE); await page.waitForTimeout(500);
+    ok('Touch quer → Querformat-Gerät', await page.evaluate(() => MP.App.land));
+    await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(700);
+    ok('Touch hochkant → Hochformat-Gerät', !(await page.evaluate(() => MP.App.land)));
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+    ok('Touch: kein seitliches Scrollen', sw);
+    ok('Touch: keine JS-Fehler', !errs.length, errs);
+    await browser.close();
+  }
   console.log(fails ? fails + ' Browser-Tests fehlgeschlagen' : 'Alle Browser-Tests bestanden');
   process.exit(fails ? 1 : 0);
 })();

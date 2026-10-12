@@ -32,7 +32,9 @@ Das App-Menü hat alle 15 Apps des ClassPad II in der Original-Reihenfolge.
 Gerät: Gehäuse im Hochformat mit den Proportionen des fx-CP400 (89 × 206 mm, LCD 320 × 528 Pixel),
 Hardware-Tasten inkl. Shift-Ebene, Icon-Leiste (Settings, Menu, Main, Resize, Swap, Rotate, Esc),
 Soft-Keyboard (Math1, Math2, Trig, Var, abc), Statusleiste zum Antippen, Aus/An über Shift+Clear.
-Rotate dreht das ganze Gerät quer. Alles wird im Browser gespeichert (localStorage).
+Rotate schaltet auf ein echtes Querformat-Gerät: breites Gehäuse, Display (528 × 320) links, Tastenfeld
+rechts daneben, alle Beschriftungen aufrecht. Auf iPhone und iPad folgt das Gerät automatisch dem Drehen in
+der Hand. Alles wird im Browser gespeichert (localStorage).
 
 ## Erscheinungsbild
 
@@ -60,7 +62,7 @@ ersten Bild gesetzt, nichts blitzt auf. Daneben: Zoom (−, Fit, +) und die Tast
 npm install          # nerdamer-prime 1.5.0
 npm run build        # baut dist/MathPad-II.html (eine Datei, alles eingebettet)
 npm test             # 106 Rechenkern-Tests in Node
-npm run test:e2e     # 71 Browser-Prüfungen mit Playwright (Chromium)
+npm run test:e2e     # 77 Browser-Prüfungen mit Playwright (Chromium)
 ```
 
 Aufbau (`src/`):
