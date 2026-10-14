@@ -39,6 +39,19 @@ jobs:
           file "build/Flüster.app/Contents/MacOS/Fluester"
           ls -la "build/Flüster.app/Contents/Resources"
 
+      - name: whisper.cpp für den Selbsttest
+        run: |
+          brew install whisper-cpp
+          ls -1 "$(brew --prefix)/bin" | grep -i whisper
+          MODELS="$HOME/Library/Application Support/Fluester/models"
+          mkdir -p "$MODELS"
+          curl -sSL --retry 3 -o "$MODELS/ggml-base.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+          ls -la "$MODELS"
+
+      - name: Selbsttest (echte Spracherkennung mit say + Whisper + Apple)
+        timeout-minutes: 12
+        run: FLUESTER_SELFTEST_WHISPER=base "build/Flüster.app/Contents/MacOS/Fluester" --selftest
+
       - uses: actions/upload-artifact@v4
         with:
           name: Fluester-macOS
