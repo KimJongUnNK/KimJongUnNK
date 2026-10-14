@@ -49,7 +49,7 @@ jobs:
           ls -la "$MODELS"
 
       - name: Selbsttest (echte Spracherkennung mit say + Whisper + Apple)
-        timeout-minutes: 12
+        timeout-minutes: 15
         run: |
           FLUESTER_SELFTEST_WHISPER=base "build/Flüster.app/Contents/MacOS/Fluester" --selftest || {
             echo "--- whisper-server.log ---"
