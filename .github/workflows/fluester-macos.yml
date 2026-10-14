@@ -50,7 +50,12 @@ jobs:
 
       - name: Selbsttest (echte Spracherkennung mit say + Whisper + Apple)
         timeout-minutes: 12
-        run: FLUESTER_SELFTEST_WHISPER=base "build/Flüster.app/Contents/MacOS/Fluester" --selftest
+        run: |
+          FLUESTER_SELFTEST_WHISPER=base "build/Flüster.app/Contents/MacOS/Fluester" --selftest || {
+            echo "--- whisper-server.log ---"
+            cat "$HOME/Library/Application Support/Fluester/whisper-server.log" || true
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:
