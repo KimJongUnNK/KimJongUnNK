@@ -2,7 +2,7 @@
 - 👀 I’m interested in jailbreakin, Apple stuff and coding
 - 🌱 I’m currently learning: coding
 - 💞️ I’m looking to collaborate on nothing special
-- 📫 How to reach me: Twitter: EmilZockt
+- 📫 How to reach me: coolertyp0007@gmail.com
 
 <!---
 KimJongUnNK/KimJongUnNK is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
