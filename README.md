@@ -1,4 +1,4 @@
-- 👋 Hi, I’m @KimJongUnNK also known as Emil
+- 👋 Hi, I’m Geek also known as Emil
 - 👀 I’m interested in jailbreakin, Apple stuff and coding
 - 🌱 I’m currently learning: coding
 - 💞️ I’m looking to collaborate on nothing special
