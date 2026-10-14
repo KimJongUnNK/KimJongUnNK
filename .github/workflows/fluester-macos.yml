@@ -5,9 +5,6 @@ on:
     paths:
       - "fluester/**"
       - ".github/workflows/fluester-macos.yml"
-  pull_request:
-    paths:
-      - "fluester/**"
   workflow_dispatch:
 
 permissions:
