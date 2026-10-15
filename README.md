@@ -1,4 +1,4 @@
-- 👋 Hi, I’m Geek also known as Emil
+- 👋 Hi, I’m Geek also known as Geek
 - 👀 I’m interested in jailbreakin, Apple stuff and coding
 - 🌱 I’m currently trying new stuff
 - 📫 How to reach me: coolertyp0007@gmail.com
