@@ -1,0 +1,15 @@
+{
+  "name": "mathpad-ii",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CAS-Grafikrechner im Stil des ClassPad II als einzelne HTML-Datei",
+  "scripts": {
+    "build": "python3 build.py",
+    "test": "node test/cas.test.js",
+    "test:e2e": "node test/e2e.test.js"
+  },
+  "dependencies": {
+    "nerdamer-prime": "1.5.0"
+  },
+  "license": "MIT"
+}
