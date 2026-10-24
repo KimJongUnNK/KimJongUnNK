@@ -1,0 +1,15 @@
+{
+  "name": "zentrale",
+  "version": "1.0.0",
+  "description": "SwitchBot-Steuerung im Browser: einloggen, tippen, fertig.",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "test": "node --test",
+    "deploy:cloudflare": "npx wrangler@4 deploy"
+  },
+  "license": "MIT"
+}
