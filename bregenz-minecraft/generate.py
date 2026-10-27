@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bregenz import anvil, buildings, config, details, geo, landmarks, level, mapitems, render, roads, terrain, vegetation
+from bregenz import anvil, buildings, config, details, geo, landmarks, level, mapitems, render, roads, signs, terrain, vegetation
 from bregenz.world import BIOMES, World, build_chunk_blocks, chunk_biome_grid
 
 ROOT = Path(__file__).resolve().parent
@@ -79,6 +79,7 @@ def main(argv=None) -> int:
     stats.update(buildings.build(world, landmarks.exclusion_zones(), landmarks.styles_for(world), log))
     stats.update(landmarks.build(world, log))
     stats["street_lamps"] = roads.street_lamps(world)
+    stats.update(signs.build(world, log))
     stats.update(details.build(world, log))
     stats.update(vegetation.build(world, log))
     log(f"edits: {world.edits.count:,} block placements, sorting by chunk")

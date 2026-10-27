@@ -107,8 +107,23 @@ def build(world: World, log=print) -> dict:
     natural = ~ndimage.binary_dilation(urban, iterations=6)
     E = E + np.where(natural & ~lake & ~rivers, rough, 0.0).astype(np.float32)
 
-    # ---- edge fade into the lake
-    f = edge_factor(grid, config.EDGE_FADE)
+    # ---- outside the data core the real terrain runs out into the lake: smoothed relief, sinking
+    # gradually over EDGE_BAND blocks, with a noisy (natural) shoreline instead of a straight edge
+    core = geo.Grid.from_bbox(config.CORE_BBOX)
+    xs_ = np.arange(grid.x0, grid.x1, dtype=np.float32) + 0.5
+    zs_ = np.arange(grid.z0, grid.z1, dtype=np.float32) + 0.5
+    dx = np.maximum(np.maximum(core.x0 - xs_, xs_ - core.x1), 0)
+    dz = np.maximum(np.maximum(core.z0 - zs_, zs_ - core.z1), 0)
+    dcore = np.hypot(dz[:, None], dx[None, :]).astype(np.float32)
+    outside = dcore > 0
+    world.outside_core = outside
+    world.dcore = dcore
+    coast = value_noise(shape, 260.0, config.SEED + 21) * 140 + value_noise(shape, 70.0, config.SEED + 22) * 40
+    t = np.clip((dcore + np.where(outside, coast, 0)) / config.EDGE_BAND, 0, 1)
+    f = np.minimum(1.0 - _smoothstep(t), edge_factor(grid, config.EDGE_FADE)).astype(np.float32)
+    Es = ndimage.gaussian_filter(E, 6)
+    wsm = np.clip(dcore / 200.0, 0, 1)
+    E = np.where(outside, E * (1 - wsm) + Es * wsm, E).astype(np.float32)
     base = WL - 12.0
     E = base + (E - base) * f
     land_e = np.maximum(E, WL + 1.0)
@@ -211,6 +226,11 @@ def _materials(world: World, E, lake, flowing, pools) -> None:
     open_land |= raster.polygons([r["geom"] for r in land if r["subtype"] in ("grass", "shrub")], g).astype(bool)
     osm_forest = mask_of(lambda r: r["subtype"] == "forest")
     forest = osm_forest | (forest & ~open_land)
+    # the band outside the data core: mostly mixed woodland with clearings
+    band = getattr(world, "outside_core", np.zeros(shape, bool))
+    dcore = getattr(world, "dcore", np.zeros(shape, np.float32))
+    ramp = np.clip(dcore / 250.0, 0, 1)   # fades in, so the core border leaves no straight line
+    forest |= band & (n2 + 0.5 * ramp > 0.05) & (E > 440) & (slope > 0.15)
     world.forest_mask = forest & ~lake
 
     lu = data.overture("land_use")

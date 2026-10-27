@@ -178,7 +178,7 @@ def build(world: World, log=print) -> dict:
         if r["class"] in ("pitch",):
             tags = r.get("source_tags") or []
             tags = dict(tags) if isinstance(tags, list) else tags
-            if _pitch(world, raster.to_block_geom(r["geom"]), (tags.get("sport") or "").split(";")[0]):
+            if _pitch(world, raster.to_block_geom(r["geom"]), (tags.get("sport") or "").split(";")[0], tags.get("surface") or ""):
                 stats["pitches"] += 1
         elif r["class"] == "playground":
             if _playground(world, raster.to_block_geom(r["geom"])):
@@ -340,8 +340,21 @@ SURFACE = {"soccer": "grass_block", "tennis": "terracotta", "basketball": "gray_
            "skateboard": "smooth_stone", "chess": "smooth_stone", "table_tennis": "smooth_stone", "": "grass_block"}
 
 
-def _pitch(world: World, gb, sport: str = "") -> bool:
-    """Sports ground built according to its OSM sport tag."""
+# Real orange courts: tartan everywhere, clay (tennis "Sandplatz"), rubber running tracks. Courts known to be orange
+# from photos but untagged in OSM are listed by position (BG Gallus schoolyard).
+ORANGE = "orange_terracotta"
+ORANGE_COURTS = [(-118, 510)]
+
+
+def _is_orange(sport: str, surface: str, gb) -> bool:
+    if surface in ("tartan", "clay") or (surface == "rubber" and sport in ("athletics", "running")):
+        return True
+    c = gb.centroid
+    return any(math.hypot(c.x - x, c.y - z) < 12 for x, z in ORANGE_COURTS)
+
+
+def _pitch(world: World, gb, sport: str = "", surface: str = "") -> bool:
+    """Sports ground built according to its OSM sport tag (surface colour from the OSM surface tag)."""
     if gb.geom_type != "Polygon" or gb.area < 12:
         return False
     g = world.grid
@@ -359,7 +372,8 @@ def _pitch(world: World, gb, sport: str = "") -> bool:
     if (world.wtop[Z - g.z0, X - g.x0] > world.H[Z - g.z0, X - g.x0]).any():
         return False
     sport = sport if sport in SURFACE else ""
-    h = _flatten(world, X, Z, SURFACE[sport])
+    orange = _is_orange(sport, surface, gb)
+    h = _flatten(world, X, Z, ORANGE if orange else SURFACE[sport])
     long_v, hs, hl = _axes(gb)
     c = np.asarray(gb.centroid.coords[0])
     n = np.array([-long_v[1], long_v[0]])
@@ -390,6 +404,22 @@ def _pitch(world: World, gb, sport: str = "") -> bool:
                 E.set(x, h + k, z, f"{block}[{props}]")
         return cells
 
+    if sport == "multi" and orange:
+        BLUE = B("blue_concrete")
+        for t in np.arange(-hl * 0.6, hl * 0.6 + 0.01, 0.5):   # blue inner court lines
+            for sgn in (-1, 1):
+                p = c + long_v * t + n * sgn * hs * 0.6
+                x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+                if g.inside(x, z):
+                    world.top[z - g.z0, x - g.x0] = BLUE
+        for side in (-1, 1):                    # basketball hoops on the long sides (goals sit on the short ones)
+            p = c + n * side * (hs - 0.5)
+            x, z = int(p[0]), int(p[1])
+            for k in range(1, 4):
+                E.set(x, h + k, z, "iron_bars")
+            E.set(x, h + 4, z, "white_concrete")
+            q = c + n * side * (hs - 1.5)
+            E.set(int(q[0]), h + 3, int(q[1]), "orange_concrete")
     if sport in ("soccer", "multi", ""):
         outline()
         for o in np.arange(-hs, hs + 0.01, 0.5):

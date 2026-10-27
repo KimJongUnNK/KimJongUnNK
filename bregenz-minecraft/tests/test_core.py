@@ -213,3 +213,33 @@ def test_map_colors_and_items(tmp_path):
     with gzip.open(tmp_path / "level.dat") as f:
         d = nbt.decode(f.read())[1]["Data"]
     assert d["Player"]["Inventory"][0]["components"]["minecraft:map_id"] == 0
+
+
+# ------------------------------------------------------------- signs & builds
+def test_street_name_wrapping():
+    from bregenz.signs import wrap
+    assert wrap("Kornmarktstraße") == ["Kornmarktstraße"]
+    assert wrap("Heldendankstraße") == ["Heldendank-", "straße"]
+    assert all(len(line) <= 15 for line in wrap("Vorarlberger Landesbibliothek Fluherstraße"))
+    assert wrap("Platz der Wiener Symphoniker") == ["Platz der", "Wiener", "Symphoniker"]
+
+
+def test_circle_fit_and_connected_states():
+    from bregenz import civic
+    ang = np.linspace(0, np.pi, 9)
+    cx, cz, r = civic._circle_fit(np.column_stack([3 + 8 * np.cos(ang), -2 + 8 * np.sin(ang)]))
+    assert abs(cx - 3) < 1e-6 and abs(cz + 2) < 1e-6 and abs(r - 8) < 1e-6
+    st = civic._connected({(0, 0), (1, 0), (1, 1)}, "birch_fence")
+    assert st[(1, 0)] == "birch_fence[north=false,south=true,east=false,west=true]"
+
+
+def test_only_real_orange_courts():
+    import shapely
+    from bregenz import details
+    far = shapely.Point(5000, 5000).buffer(10)
+    assert details._is_orange("multi", "tartan", far)
+    assert details._is_orange("tennis", "clay", far)
+    assert details._is_orange("running", "rubber", far)
+    assert not details._is_orange("tennis", "rubber", far)
+    assert not details._is_orange("multi", "", far)
+    assert details._is_orange("multi", "", shapely.Point(-118, 510).buffer(10))   # BG Gallus (photo)

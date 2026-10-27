@@ -46,7 +46,7 @@ def tile_xy(lon: float, lat: float, z: int) -> tuple[float, float]:
     return x, y
 
 
-def fetch_terrain(bbox=config.FETCH_BBOX, z: int = config.DEM_ZOOM) -> None:
+def fetch_terrain(bbox=config.WORLD_BBOX, z: int = config.DEM_ZOOM) -> None:
     out = RAW / "terrarium"
     out.mkdir(parents=True, exist_ok=True)
     lon0, lat0, lon1, lat1 = bbox

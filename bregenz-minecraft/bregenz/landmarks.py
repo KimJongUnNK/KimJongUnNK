@@ -12,7 +12,7 @@ import shapely
 import shapely.ops
 from scipy import ndimage
 
-from . import buildings, config, data, geo, raster
+from . import buildings, civic, config, data, geo, raster
 from .blocks import B
 from .vox import Vox
 from .world import World
@@ -113,10 +113,8 @@ def _ring_cells(poly_block) -> set[tuple[int, int]]:
 
 # -------------------------------------------------------- style overrides
 STYLES = {
-    "Festspiel- und Kongresshaus Bregenz": dict(facade="light_gray_concrete", flat=True, height=24, glass="light_gray_stained_glass_pane",
-                                                 shop=True, green_roof=False, parapet_block="smooth_stone_slab[type=bottom]", floor_h=4),
-    "Theater am Kornmarkt": dict(facade="smooth_stone", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), gable=True,
-                                 flat=False, height=19, pitch=0.5, windows="tall", floor_h=6, foundation="polished_andesite"),
+    "Festspiel- und Kongresshaus Bregenz": dict(skip=True),   # custom (civic.festspielhaus)
+    "Theater am Kornmarkt": dict(skip=True),   # custom (civic.theater)
     "Deuringschlößle": dict(facade="white_concrete", roof=("bricks", "brick_slab[type=bottom]"), flat=False, gable=False,
                             pitch=1.0, height=20, windows="shutters", shutter="green_terracotta"),
     "Altes Rathaus": dict(facade="white_concrete", roof=("bricks", "brick_slab[type=bottom]"), flat=False, gable=True,
@@ -152,6 +150,10 @@ STYLES = {
     "Bregenz Busbahnhof": dict(skip=True),     # custom: bus canopy + station building (bahnhof())
     "Haus am Hafen": dict(skip=True),           # custom (Sutterlüty cubes, kreisverkehr_schillerstrasse)
     "Casino Bregenz": dict(skip=True),          # custom (two domes)
+    "Landhaus": dict(skip=True),                # custom (civic.landhaus)
+    "Ehemaliges St.-Gallus-Stift": dict(skip=True),  # Landesbibliothek (civic.landesbibliothek)
+    "Rathaus": dict(skip=True),                 # custom (civic.rathaus)
+    "Nepomukkapelle": dict(skip=True),          # custom (civic.kornmarkt)
 }
 
 
@@ -166,10 +168,37 @@ def styles_for(world: World):
 
     stadiums = [raster.to_block_geom(r["geom"]) for r in data.overture("land_use") if r["class"] == "stadium"]
 
+    kornmesser = shapely.Point(99, -30)
+    kub_cafe = shapely.Point(78, -19)
+    lb_wing = shapely.Point(-119, 1219)
+    kmp = civic.kornmarkt_rows()
+
     def style(r):
         s = STYLES.get(r["name"])
         if s is not None:
             return dict(s)
+        if civic.is_bg_gallus(r) or civic.on_kornmarkt(r):
+            return dict(skip=True)
+        if r["name"] is None:
+            p = raster.to_block_geom(r["geom"])
+            if 380 < p.area < 520 and p.distance(lb_wing) < 15:
+                return dict(skip=True)          # Landesbibliothek neo-Gothic wing (civic.landesbibliothek)
+            if 220 < p.area < 320 and p.centroid.distance(kornmesser) < 6:
+                # Gasthaus Kornmesser: salmon-orange baroque house, green shutters, dark brown roof
+                return dict(facade="smooth_red_sandstone", roof=("dark_oak_planks", "dark_oak_slab[type=bottom]"),
+                            flat=False, gable=True, pitch=1.1, height=17, wall_height=10, windows="shutters",
+                            shutter="green_terracotta", shop=True, frames=True)
+            if kmp is not None and p.distance(kmp) < 6 and p.area > 60 and r.get("class") not in ("toilets",):
+                # the houses round the Kornmarkt: yellow, salmon-pink and cream with green shutters
+                k = int(abs(p.centroid.x * 7 + p.centroid.y * 13)) % 5
+                fac = ["yellow_terracotta", "pink_terracotta", "smooth_sandstone", "yellow_terracotta", "white_terracotta"][k]
+                return dict(facade=fac, roof=("dark_oak_planks", "dark_oak_slab[type=bottom]") if k % 2 else
+                            ("bricks", "brick_slab[type=bottom]"), flat=False, windows="shutters",
+                            shutter="green_terracotta", frames=True, shop=True)
+            if 140 < p.area < 210 and p.centroid.distance(kub_cafe) < 6:
+                # KUB Café: low glass pavilion in the KUB's frosted glass
+                return dict(facade="white_stained_glass", flat=True, height=5, wall_height=4, glass="glass_pane",
+                            shop=True, green_roof=False, parapet=False, trim=False, plinth=False)
         if r.get("class") in ("stadium", "grandstand") and stadiums:
             p = raster.to_block_geom(r["geom"])
             near = min(stadiums, key=lambda sg: sg.distance(p))
@@ -209,8 +238,9 @@ def exclusion_zones() -> shapely.Geometry:
 # ------------------------------------------------------------- the builds
 def build(world: World, log=print) -> dict:
     done, failed = [], []
-    for fn in (kunsthaus, vorarlberg_museum, martinsturm, seebuehne, fischersteg, piers, mili_bridge, st_gallus_tower,
-               unteres_tor_passage, herz_jesu, hauptpost, bahnhof, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
+    for fn in (kunsthaus, vorarlberg_museum, martinsturm, seebuehne, civic.fischersteg, piers, mili_bridge, st_gallus_tower,
+               unteres_tor_passage, herz_jesu, hauptpost, civic.bahnhof, civic.festspielhaus, civic.landhaus,
+               civic.landesbibliothek, civic.bg_gallus, civic.rathaus, civic.theater, civic.kornmarkt, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
                harbour_detail):
         try:
             fn(world)
@@ -1585,6 +1615,10 @@ LABELS = [
     ("Pfänderbahn Bergstation", "building", "Bergstation", ["Pfänderbahn", "Bergstation", "1022 m"]),
     ("St. Wendelin (Fluh)", "building", "Pfarrkirche St. Wendelin", ["Fluh", "St. Wendelin"]),
     ("Sender Pfänder", "building", "Sender Pfänder", ["Sender", "Pfänder"]),
+    ("Landhaus (Schild)", "building", "Landhaus", ["Landhaus", "Vorarlberger", "Landtag"]),
+    ("Rathaus (Schild)", "building", "Rathaus", ["Rathaus", "Bregenz"]),
+    ("Landesbibliothek", "building", "Ehemaliges St.-Gallus-Stift", ["Vorarlberger", "Landes-", "bibliothek"]),
+    ("Nepomukkapelle (Schild)", "building", "Nepomukkapelle", ["Nepomuk-", "kapelle"]),
 ]
 
 
