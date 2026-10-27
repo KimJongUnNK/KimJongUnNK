@@ -169,9 +169,16 @@ def build(world: World, log=print) -> dict:
             elif cls == "power_line":
                 _power_line(world, gb)
 
+    stats["stadiums"] = 0
+    for r in data.overture("land_use"):
+        if r["class"] == "stadium":
+            if _stadium(world, raster.to_block_geom(r["geom"])):
+                stats["stadiums"] += 1
     for r in data.overture("land_use"):
         if r["class"] in ("pitch",):
-            if _pitch(world, raster.to_block_geom(r["geom"])):
+            tags = r.get("source_tags") or []
+            tags = dict(tags) if isinstance(tags, list) else tags
+            if _pitch(world, raster.to_block_geom(r["geom"]), (tags.get("sport") or "").split(";")[0]):
                 stats["pitches"] += 1
         elif r["class"] == "playground":
             if _playground(world, raster.to_block_geom(r["geom"])):
@@ -319,49 +326,254 @@ def _power_line(world: World, gb) -> None:
                     world.edits.set(px, y, pz, f"chain[axis={axis}]")
 
 
-def _pitch(world: World, gb) -> bool:
-    if gb.geom_type != "Polygon" or gb.area < 300:
+def _flatten(world: World, X, Z, top):
+    g = world.grid
+    h = int(np.median(world.H[Z - g.z0, X - g.x0]))
+    world.H[Z - g.z0, X - g.x0] = h
+    world.top[Z - g.z0, X - g.x0] = B(top) if isinstance(top, str) else top
+    world.occupied[Z - g.z0, X - g.x0] = True
+    return h
+
+
+SURFACE = {"soccer": "grass_block", "tennis": "terracotta", "basketball": "gray_concrete", "beachvolleyball": "sand",
+           "volleyball": "sand", "athletics": "red_terracotta", "running": "red_terracotta", "multi": "green_terracotta",
+           "skateboard": "smooth_stone", "chess": "smooth_stone", "table_tennis": "smooth_stone", "": "grass_block"}
+
+
+def _pitch(world: World, gb, sport: str = "") -> bool:
+    """Sports ground built according to its OSM sport tag."""
+    if gb.geom_type != "Polygon" or gb.area < 12:
         return False
     g = world.grid
     m, x0, z0 = raster.polygon_cells(gb)
-    per = m & ~ndimage.binary_erosion(m, structure=np.ones((3, 3)))
     zz, xx = np.nonzero(m)
     X, Z = xx + x0, zz + z0
     ok = g.inside(X, Z)
     if ok.mean() < 0.9:
         return False
     X, Z = X[ok], Z[ok]
-    if world.wtop[Z - g.z0, X - g.x0].max() > world.H[Z - g.z0, X - g.x0].min() + 50:
+    free = ~world.occupied[Z - g.z0, X - g.x0]
+    if free.mean() < 0.8:   # inside the stadium, under buildings, ...
         return False
-    # flat green turf
-    h = int(np.median(world.H[Z - g.z0, X - g.x0]))
-    world.H[Z - g.z0, X - g.x0] = h
-    world.top[Z - g.z0, X - g.x0] = B("grass_block")
-    world.occupied[Z - g.z0, X - g.x0] = True
-    pz_, px_ = np.nonzero(per)
-    world.top[pz_ + z0 - g.z0, px_ + x0 - g.x0] = B("white_concrete")
+    X, Z = X[free], Z[free]
+    if (world.wtop[Z - g.z0, X - g.x0] > world.H[Z - g.z0, X - g.x0]).any():
+        return False
+    sport = sport if sport in SURFACE else ""
+    h = _flatten(world, X, Z, SURFACE[sport])
     long_v, hs, hl = _axes(gb)
     c = np.asarray(gb.centroid.coords[0])
     n = np.array([-long_v[1], long_v[0]])
-    for o in np.arange(-hs, hs + 0.01, 0.5):  # halfway line + centre circle
-        p = c + n * o
-        if g.inside(int(p[0]), int(p[1])):
-            world.top[int(p[1]) - g.z0, int(p[0]) - g.x0] = B("white_concrete")
-    for ang in np.linspace(0, 2 * np.pi, 60):
-        p = c + 6 * np.array([math.cos(ang), math.sin(ang)])
-        if g.inside(int(p[0]), int(p[1])):
-            world.top[int(p[1]) - g.z0, int(p[0]) - g.x0] = B("white_concrete")
-    # goals at both ends
-    for side in (-1, 1):
-        gc = c + long_v * side * (hl - 1.5)
-        for o in (-3, 3):
-            p = gc + n * o
+    E = world.edits
+    WHITE = B("white_concrete")
+
+    def mark(p):
+        x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+        if g.inside(x, z):
+            world.top[z - g.z0, x - g.x0] = WHITE
+
+    def outline(inset=0.5):
+        for t in np.arange(-hl + inset, hl - inset + 0.01, 0.5):
+            mark(c + long_v * t + n * (hs - inset))
+            mark(c + long_v * t - n * (hs - inset))
+        for o in np.arange(-hs + inset, hs - inset + 0.01, 0.5):
+            mark(c + n * o + long_v * (hl - inset))
+            mark(c + n * o - long_v * (hl - inset))
+
+    def net(height=1, block="iron_bars"):
+        cells = set()
+        for o in np.arange(-hs - 0.5, hs + 0.51, 0.5):
+            p = c + n * o
+            cells.add((int(math.floor(p[0])), int(math.floor(p[1]))))
+        for (x, z) in cells:
+            props = ",".join(f"{d}={str((x + dx, z + dz) in cells).lower()}" for d, (dx, dz) in DIRS.items())
+            for k in range(1, height + 1):
+                E.set(x, h + k, z, f"{block}[{props}]")
+        return cells
+
+    if sport in ("soccer", "multi", ""):
+        outline()
+        for o in np.arange(-hs, hs + 0.01, 0.5):
+            mark(c + n * o)
+        if hl > 20:
+            for ang in np.linspace(0, 2 * np.pi, 60):
+                mark(c + min(6.0, hs * 0.3) * np.array([math.cos(ang), math.sin(ang)]))
+        gw = 3 if hl > 25 else 1.5
+        gh = 3 if hl > 25 else 2
+        for side in (-1, 1):
+            gc = c + long_v * side * (hl - 1.0)
+            for o in (-gw, gw):
+                p = gc + n * o
+                for k in range(1, gh + 1):
+                    E.set(int(p[0]), h + k, int(p[1]), "white_concrete")
+            for o in np.arange(-gw, gw + 0.01, 0.5):
+                p = gc + n * o
+                E.set(int(p[0]), h + gh, int(p[1]), "white_concrete")
+    elif sport == "tennis":
+        outline(0.5)
+        for o in np.arange(-hs, hs + 0.01, 0.5):     # service lines
+            mark(c + n * o * 0.75 + long_v * hl * 0.5)
+            mark(c + n * o * 0.75 - long_v * hl * 0.5)
+        for t in np.arange(-hl * 0.5, hl * 0.5 + 0.01, 0.5):
+            mark(c + long_v * t)
+        net(1)
+    elif sport == "basketball":
+        outline()
+        for o in np.arange(-hs, hs + 0.01, 0.5):
+            mark(c + n * o)
+        for side in (-1, 1):
+            p = c + long_v * side * (hl - 1.0)
             x, z = int(p[0]), int(p[1])
-            world.edits.set(x, h + 1, z, "white_concrete")
-            world.edits.set(x, h + 2, z, "white_concrete")
-        for o in np.arange(-3, 3.01, 0.5):
+            for k in range(1, 4):
+                E.set(x, h + k, z, "iron_bars")
+            E.set(x, h + 4, z, "white_concrete")
+            q = c + long_v * side * (hl - 2.0)
+            E.set(int(q[0]), h + 3, int(q[1]), "orange_concrete")
+    elif sport in ("beachvolleyball", "volleyball"):
+        outline()
+        cells = net(1, "white_stained_glass_pane")
+        for (x, z) in cells:
+            E.set(x, h + 2, z, "white_wool")
+    elif sport in ("athletics", "running"):
+        for o in np.arange(-hs + 1, hs, 1.25):
+            for t in np.arange(-hl, hl + 0.01, 0.5):
+                mark(c + long_v * t + n * o)
+    elif sport == "chess":
+        side = int(min(8, hs * 2, hl * 2))
+        for i in range(side):
+            for j in range(side):
+                p = c + long_v * (i - side / 2 + 0.5) + n * (j - side / 2 + 0.5)
+                x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+                if g.inside(x, z):
+                    world.top[z - g.z0, x - g.x0] = B("white_concrete" if (i + j) % 2 else "black_concrete")
+    elif sport == "table_tennis":
+        for t in (-1, 0, 1):
+            for o in (0,):
+                p = c + long_v * t
+                x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+                E.set(x, h + 1, z, "dark_prismarine_slab[type=top]")
+    elif sport == "skateboard":
+        for side in (-1, 1):
+            for o in np.arange(-hs + 1, hs - 0.99, 0.5):
+                p = c + long_v * side * (hl - 1.5) + n * o
+                face = _dir_of(-long_v * side)
+                E.set(int(math.floor(p[0])), h + 1, int(math.floor(p[1])), f"smooth_stone_slab[type=bottom]")
+                q = p + long_v * side
+                E.set(int(math.floor(q[0])), h + 1, int(math.floor(q[1])), f"stone_stairs[facing={_dir_of(long_v * side)},half=bottom]")
+    return True
+
+
+def _dir_of(v) -> str:
+    if abs(v[0]) >= abs(v[1]):
+        return "east" if v[0] > 0 else "west"
+    return "south" if v[1] > 0 else "north"
+
+
+def _stadium(world: World, gb) -> bool:
+    """Casino-Stadion: football pitch inside a red running track, grandstands (built in landmarks via the
+    stadium buildings) and four floodlight masts."""
+    if gb.geom_type != "Polygon":
+        return False
+    g = world.grid
+    long_v, hs, hl = _axes(gb)
+    c = np.asarray(gb.centroid.coords[0])
+    n = np.array([-long_v[1], long_v[0]])
+    # field 100 x 64 (or what fits), track 6 wide around it
+    fl, fw = min(52.0, hl - 9), min(33.0, hs - 9)
+    if fl < 20 or fw < 12:
+        return False
+    cells = []
+    m, x0, z0 = raster.polygon_cells(gb)
+    zz, xx = np.nonzero(m)
+    X, Z = xx + x0, zz + z0
+    ok = g.inside(X, Z)
+    if ok.mean() < 0.9:
+        return False
+    X, Z = X[ok], Z[ok]
+    h = int(np.median(world.H[Z - g.z0, X - g.x0]))
+    P = np.column_stack([X + 0.5, Z + 0.5]) - c
+    a, t = P @ long_v, P @ n
+    # use the real OSM pitch + running track inside the stadium when they exist
+    osm_field = osm_track = None
+    for r in data.overture("land_use"):
+        if r["class"] != "pitch":
+            continue
+        pg = raster.to_block_geom(r["geom"])
+        if not pg.within(gb.buffer(5)):
+            continue
+        tags = r.get("source_tags") or []
+        tags = dict(tags) if isinstance(tags, list) else tags
+        sp = tags.get("sport") or ""
+        if "soccer" in sp:
+            osm_field = pg
+        elif sp in ("running", "athletics"):
+            osm_track = pg if osm_track is None or pg.area > osm_track.area else osm_track
+    if osm_field is not None:
+        long_v, fw_, fl_ = _axes(osm_field)
+        c = np.asarray(osm_field.centroid.coords[0])
+        n = np.array([-long_v[1], long_v[0]])
+        fl, fw = fl_ - 0.5, fw_ - 0.5
+        P = np.column_stack([X + 0.5, Z + 0.5]) - c
+        a, t = P @ long_v, P @ n
+
+    def inside_oval(ext):
+        r = fw + ext
+        da = np.maximum(np.abs(a) - (fl - fw), 0)
+        return np.hypot(da, t) <= r
+    field = (np.abs(a) <= fl) & (np.abs(t) <= fw)
+    if osm_track is not None and osm_field is not None:
+        tm, tx0, tz0 = raster.polygon_cells(osm_track)
+        on_track = np.zeros(len(X), bool)
+        ii, jj = Z - tz0, X - tx0
+        okk = (ii >= 0) & (ii < tm.shape[0]) & (jj >= 0) & (jj < tm.shape[1])
+        on_track[okk] = tm[ii[okk], jj[okk]]
+        inner = field | (on_track & inside_oval(0.0))
+        track = on_track & ~field & ~inside_oval(0.0) | (inside_oval(7.5) & ~inside_oval(1.0))
+    else:
+        track = inside_oval(7.5) & ~inside_oval(1.0)
+        inner = inside_oval(1.0)
+    sel = inner | track
+    Xs, Zs = X[sel], Z[sel]
+    world.H[Zs - g.z0, Xs - g.x0] = h
+    world.occupied[Zs - g.z0, Xs - g.x0] = True
+    world.top[Z[inner] - g.z0, X[inner] - g.x0] = B("grass_block")
+    world.top[Z[track] - g.z0, X[track] - g.x0] = B("red_terracotta")
+    # lane lines
+    for ext in (2.25, 3.5, 4.75, 6.0):
+        lane = inside_oval(ext + 0.35) & ~inside_oval(ext - 0.35) & track
+        world.top[Z[lane] - g.z0, X[lane] - g.x0] = B("white_concrete")
+    # football markings + goals on the field
+    WHITE = B("white_concrete")
+    edge = field & ((np.abs(np.abs(a) - fl) < 0.6) | (np.abs(np.abs(t) - fw) < 0.6) | (np.abs(a) < 0.4))
+    circle = field & (np.abs(np.hypot(a, t) - 9.15) < 0.5)
+    box = field & (np.abs(a) > fl - 16.5) & (np.abs(np.abs(t) - 20) < 0.5)
+    box |= field & (np.abs(np.abs(a) - (fl - 16.5)) < 0.5) & (np.abs(t) < 20)
+    for msk in (edge, circle, box):
+        world.top[Z[msk] - g.z0, X[msk] - g.x0] = WHITE
+    E = world.edits
+    for side in (-1, 1):
+        gc = c + long_v * side * fl
+        for o in (-3.7, 3.7):
             p = gc + n * o
-            world.edits.set(int(p[0]), h + 3, int(p[1]), "white_concrete")
+            for k in (1, 2):
+                E.set(int(math.floor(p[0])), h + k, int(math.floor(p[1])), "white_concrete")
+        for o in np.arange(-3.7, 3.71, 0.5):
+            p = gc + n * o
+            E.set(int(math.floor(p[0])), h + 3, int(math.floor(p[1])), "white_concrete")
+    # floodlight masts at the four corners
+    for sa in (-1, 1):
+        for st in (-1, 1):
+            p = c + long_v * sa * (fl + 4) + n * st * (fw + 12)
+            x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+            if not g.inside(x, z):
+                continue
+            hb = int(world.h(x, z))
+            for y in range(hb + 1, h + 26):
+                E.set(x, y, z, "iron_block" if y < h + 4 else "iron_bars")
+            for dy in (0, 1):
+                for d in (-1, 0, 1):
+                    q = p + long_v * d * 0.0 + np.array([-n[1], n[0]]) * 0 + (long_v * d if abs(long_v[0]) < abs(long_v[1]) else n * d)
+                    E.set(int(math.floor(q[0])), h + 25 + dy, int(math.floor(q[1])), "sea_lantern")
+    world.stadium = (c, long_v, fl, fw, h)
     return True
 
 

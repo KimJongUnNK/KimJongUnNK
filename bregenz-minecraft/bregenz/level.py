@@ -65,7 +65,22 @@ def write_datapack(world_dir: Path) -> Path:
     return root
 
 
-def level_dat(spawn: tuple[int, int, int], border: tuple[float, float, float]) -> dict:
+def player(spawn: tuple[int, int, int], items: list[dict]) -> dict:
+    """The singleplayer host: standing at the spawn, creative, with the starter items."""
+    return {
+        "DataVersion": nbt.Int(config.DATA_VERSION),
+        "Pos": nbt.List([nbt.Double(spawn[0] + 0.5), nbt.Double(spawn[1]), nbt.Double(spawn[2] + 0.5)], nbt.TAG_DOUBLE),
+        "Rotation": nbt.List([nbt.Float(180.0), nbt.Float(0.0)], nbt.TAG_FLOAT),
+        "Motion": nbt.List([nbt.Double(0), nbt.Double(0), nbt.Double(0)], nbt.TAG_DOUBLE),
+        "Dimension": "minecraft:overworld",
+        "playerGameType": nbt.Int(1),
+        "Health": nbt.Float(20.0), "foodLevel": nbt.Int(20), "OnGround": nbt.Byte(1),
+        "SelectedItemSlot": nbt.Int(0),
+        "Inventory": nbt.List(items, nbt.TAG_COMPOUND),
+    }
+
+
+def level_dat(spawn: tuple[int, int, int], border: tuple[float, float, float], items: list[dict] | None = None) -> dict:
     cx, cz, size = border
     layers = nbt.List([{"block": b, "height": nbt.Int(h)} for b, h in OUTSIDE_LAYERS], nbt.TAG_COMPOUND)
     dims = {
@@ -119,8 +134,10 @@ def level_dat(spawn: tuple[int, int, int], border: tuple[float, float, float]) -
         "CustomBossEvents": {},
         "ScheduledEvents": nbt.List([], nbt.TAG_COMPOUND),
     }
+    if items:
+        data["Player"] = player(spawn, items)
     return {"Data": data}
 
 
-def write_level(world_dir: Path, spawn, border) -> None:
-    nbt.write_gzip(world_dir / "level.dat", level_dat(spawn, border))
+def write_level(world_dir: Path, spawn, border, items: list[dict] | None = None) -> None:
+    nbt.write_gzip(world_dir / "level.dat", level_dat(spawn, border, items))

@@ -123,21 +123,21 @@ STYLES = {
                           pitch=1.1, height=17, fachwerk=True),
     "Unteres Tor": dict(facade="smooth_sandstone", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), flat=False,
                         gable=False, pitch=1.0, height=18, windows="none", door=False),
-    "Martinskapelle": dict(facade="smooth_sandstone", roof=("bricks", "brick_slab[type=bottom]"), flat=False, gable=True,
+    "Martinskapelle": dict(tower=False, baroque=True, facade="smooth_sandstone", roof=("bricks", "brick_slab[type=bottom]"), flat=False, gable=True,
                            height=14, windows="tall", floor_h=12, floors=False),
     "Nostalgiebad Mili": dict(facade="dark_oak_planks", roof=("spruce_planks", "spruce_slab[type=bottom]"), flat=False,
                               gable=False, pitch=0.6, height=8, windows="shutters", shutter="lime_terracotta",
                               base=WL + 2, floor="spruce_planks"),
-    "Stadtpfarrkirche St. Gallus": dict(facade="smooth_sandstone", roof=("bricks", "brick_slab[type=bottom]"), flat=False,
+    "Stadtpfarrkirche St. Gallus": dict(tower=False, baroque=True, facade="smooth_sandstone", roof=("bricks", "brick_slab[type=bottom]"), flat=False,
                                         gable=True, pitch=0.9, height=24, wall_height=12, windows="tall", floor_h=12,
                                         floors=False),
-    "Wallfahrtskirche Hl. Gebhard": dict(facade="smooth_sandstone", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"),
+    "Wallfahrtskirche Hl. Gebhard": dict(tower="turret", baroque=True, facade="smooth_sandstone", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"),
                                          flat=False, gable=True, height=13, windows="tall", floor_h=10, floors=False),
-    "Burgrestaurant Gebhardsberg": dict(facade="stone_bricks", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"),
+    "Burgrestaurant Gebhardsberg": dict(facade="stone_bricks", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), windows="shutters", shutter="dark_oak_planks",
                                         flat=False, gable=False, height=11, foundation="mossy_stone_bricks"),
-    "St. Antonius": dict(facade="white_concrete", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), flat=False,
+    "St. Antonius": dict(tower="turret", facade="white_concrete", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), flat=False,
                          gable=True, height=15, windows="tall", floor_h=10, floors=False),
-    "Pfarrkirche St. Wendelin": dict(facade="white_concrete", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"),
+    "Pfarrkirche St. Wendelin": dict(tower="tower", spire="oxidized_cut_copper", facade="white_concrete", roof=("deepslate_tiles", "deepslate_tile_slab[type=bottom]"),
                                      flat=False, gable=True, height=13, windows="tall", floor_h=10, floors=False),
     "Talstation": dict(facade="light_gray_concrete", flat=True, height=12, glass="light_blue_stained_glass_pane", shop=True,
                        green_roof=False),
@@ -164,10 +164,17 @@ def styles_for(world: World):
     station = shapely.Point(*geo.place(47.502944, 9.739917)).buffer(90)
     roundabout = shapely.Point(*geo.place(47.505944, 9.749500))
 
+    stadiums = [raster.to_block_geom(r["geom"]) for r in data.overture("land_use") if r["class"] == "stadium"]
+
     def style(r):
         s = STYLES.get(r["name"])
         if s is not None:
             return dict(s)
+        if r.get("class") in ("stadium", "grandstand") and stadiums:
+            p = raster.to_block_geom(r["geom"])
+            near = min(stadiums, key=lambda sg: sg.distance(p))
+            if near.distance(p) < 15:
+                return dict(grandstand=near)
         if r.get("class") == "roof" and station is not None and raster.to_block_geom(r["geom"]).intersects(station):
             return dict(skip=True)  # platform canopies: built by bahnhof()
         if r.get("class") == "school" and r["name"] is None and raster.to_block_geom(r["geom"]).distance(roundabout) < 40:
@@ -688,15 +695,15 @@ def herz_jesu(world: World) -> None:
     front = P[(P @ a) > ext - 10]
     half_w = float(np.abs(front @ n).max())
     # nave + transept as a styled building (tall Gothic windows, brick, steep tile roof)
-    buildings.building(world, r, poly, dict(facade="bricks", roof=("granite", "granite_slab[type=bottom]"), flat=False,
+    buildings.building(world, r, poly, dict(tower=False, facade="bricks", roof=("granite", "granite_slab[type=bottom]"), flat=False,
                                             gable=True, pitch=1.0, height=30, wall_height=15, windows="tall",
                                             floor_h=15, floors=False, glass="light_blue_stained_glass_pane",
                                             door=False, foundation="stone_bricks"))
     base = int(np.median(world.h(xx + x0, zz + z0)))
     v = Vox(int(c[0]) - 60, base - 6, int(c[1]) - 60, 121, 90, 121)
     tw = 4.5           # tower half size
-    brick_top = base + 44
-    spire_top = brick_top + 24
+    brick_top = base + 40
+    spire_top = base + 62
     fc = c + a * (ext - tw)
     for side in (-1, 1):
         tc = fc + n * side * (half_w - tw)
@@ -911,8 +918,10 @@ def bahnhof(world: World) -> None:
             if (np.asarray(sc.coords[0]) - start) @ nrm > 0:
                 nrm = -nrm
             start = start - nrm * 14  # start on the station side
-            deck = int(world.h(int(start[0]), int(start[1]))) + 8
             L = 46
+            # clear the tracks and the catenary: highest ground below the bridge + 10
+            hmax = max(int(world.h(int(p_[0]), int(p_[1]))) for p_ in (start + nrm * k for k in range(0, L, 2)))
+            deck = hmax + 10
             for k in np.arange(0, L, 0.5):
                 for o in (-1.5, -0.5, 0.5, 1.5):
                     p_ = start + nrm * k + t * o
@@ -1085,31 +1094,159 @@ def unteres_tor_passage(world: World) -> None:
 
 
 def gebhardsberg_ruin(world: World) -> None:
-    """Burgruine Hohenbregenz on the Gebhardsberg: broken curtain wall around the summit."""
-    px, pz = geo.place(47.49001, 9.74734)
+    """Burgruine Hohenbregenz on the Gebhardsberg (598 m): the ring wall follows the edge of the rock
+    plateau, with breaches, merlon remnants and a gate where the path comes up; a ruined palas wing
+    next to the pilgrimage church (which was built into the old palas) and the terrace of the
+    Burgrestaurant looking out over the lake."""
     g = world.grid
+    px, pz = geo.place(47.49001, 9.74734)
     rnd = np.random.default_rng(598)
-    R = 42
-    for ang in np.linspace(0, 2 * np.pi, int(2 * np.pi * R * 1.4), endpoint=False):
-        x = int(round(px + R * math.cos(ang) * 1.15))
-        z = int(round(pz + R * math.sin(ang)))
-        if not g.inside(x, z) or world.occupied[z - g.z0, x - g.x0]:
+    R = 95
+    xa, xb = max(px - R - g.x0, 0), min(px + R - g.x0, g.nx)
+    za, zb = max(pz - R - g.z0, 0), min(pz + R - g.z0, g.nz)
+    if not g.inside(px, pz):
+        return
+    H = world.H[za:zb, xa:xb].astype(int)
+    cz_, cx_ = pz - g.z0 - za, px - g.x0 - xa
+    ph = int(H[max(cz_ - 25, 0):cz_ + 25, max(cx_ - 25, 0):cx_ + 25].max())
+    # plateau = the connected area near the top (castle hill), plus the church and restaurant
+    plateau = H >= ph - 7
+    lab, _ = ndimage.label(plateau)
+    sub = lab[max(cz_ - 25, 0):cz_ + 25, max(cx_ - 25, 0):cx_ + 25]
+    ids = np.unique(sub[sub > 0])
+    plateau = np.isin(lab, ids)
+    for name in ("Wallfahrtskirche Hl. Gebhard", "Burgrestaurant Gebhardsberg"):
+        r = _row("building", name)
+        if r is not None:
+            m, x0, z0 = raster.polygon_cells(_bgeom(r).buffer(4))
+            zz, xx = np.nonzero(m)
+            zz, xx = zz + z0 - g.z0 - za, xx + x0 - g.x0 - xa
+            ok = (zz >= 0) & (zz < plateau.shape[0]) & (xx >= 0) & (xx < plateau.shape[1])
+            plateau[zz[ok], xx[ok]] = True
+    plateau = ndimage.binary_closing(plateau, iterations=3)
+    plateau = ndimage.binary_fill_holes(plateau)
+    ring = plateau & ~ndimage.binary_erosion(plateau, structure=np.ones((3, 3)), iterations=2)
+    # open castle courtyard: meadow with gravel paths instead of forest
+    yard = plateau & ~ring
+    yz, yx = np.nonzero(yard)
+    gz_, gx_ = yz + za, yx + xa
+    keep = ~world.occupied[gz_, gx_]
+    gz_, gx_ = gz_[keep], gx_[keep]
+    world.top[gz_, gx_] = np.where((gx_ + gz_) % 7 == 0, B("gravel"), B("grass_block")).astype(np.uint16)
+    world.occupied[gz_, gx_] = True
+    rz, rx = np.nonzero(ring)
+    X, Z = rx + xa + g.x0, rz + za + g.z0
+    ang = np.arctan2(Z - pz, X - px)
+    mats = ["stone_bricks"] * 6 + ["mossy_stone_bricks"] * 5 + ["cracked_stone_bricks"] * 3 + \
+           ["cobblestone"] * 3 + ["mossy_cobblestone"] * 2 + ["andesite"]
+    roads = world.road
+    gate = None
+    n_wall = 0
+    for x, z, a in zip(X, Z, ang):
+        iz, ix = z - g.z0, x - g.x0
+        if world.occupied[iz, ix]:
             continue
-        hh = _ground(world, x, z)
-        hgt = int(max(0, 7 * math.sin(ang * 3.0) + rnd.integers(-2, 5)))
-        for y in range(hh + 1, hh + 1 + hgt):
-            world.edits.set(x, y, z, ["stone_bricks", "mossy_stone_bricks", "cracked_stone_bricks", "cobblestone"][rnd.integers(0, 4)])
-        if hgt:
+        if roads[iz, ix]:
+            gate = gate or (int(x), int(z))
+            continue
+        hh = int(world.H[iz, ix])
+        wave = 5.5 + 3.0 * math.sin(a * 3.0 + 0.7) + 1.5 * math.sin(a * 7.0)
+        hgt = int(max(0, wave + rnd.integers(-1, 2)))
+        if math.sin(a * 5.0 + 2.0) < -0.82:  # breaches
+            hgt = int(rnd.integers(0, 2))
+        for y in range(hh - 2, hh + 1 + hgt):
+            world.edits.set(int(x), y, int(z), mats[rnd.integers(len(mats))])
+        if hgt >= 5 and (x + z) % 3 == 0:  # merlon remnants
+            world.edits.set(int(x), hh + 1 + hgt, int(z), mats[rnd.integers(len(mats))])
+        if hgt <= 1:
+            world.edits.set(int(x), hh + 1 + hgt, int(z), "gravel" if rnd.random() < 0.5 else "mossy_cobblestone")
+        world.occupied[iz, ix] = True
+        n_wall += 1
+    # gate where the path comes up: two pillars and a round arch
+    if gate:
+        gx, gz = gate
+        hh = int(world.h(gx, gz))
+        v = Vox(gx - 6, hh - 2, gz - 6, 13, 14, 13)
+        for dx, dz in ((-3, 0), (3, 0), (0, -3), (0, 3)):
+            if not world.road[min(max(gz + dz - g.z0, 0), g.nz - 1), min(max(gx + dx - g.x0, 0), g.nx - 1)]:
+                v.column(gx + dx, gz + dz, hh - 2, hh + 7, "stone_bricks")
+                v.set(gx + dx, hh + 8, gz + dz, "mossy_stone_bricks")
+        for dx in range(-3, 4):
+            for dz in range(-3, 4):
+                if abs(dx) == 3 or abs(dz) == 3:
+                    if abs(dx) + abs(dz) >= 5:
+                        v.set(gx + dx, hh + 6, gz + dz, "stone_brick_stairs[facing=north,half=top]")
+        v.commit(world.edits)
+    # ruined palas wing beside the church: tall wall with empty arched windows
+    r = _row("building", "Wallfahrtskirche Hl. Gebhard")
+    if r is not None:
+        cp = _bgeom(r)
+        long_v, hs, hl = buildings._orientation(cp)
+        c = np.asarray(cp.centroid.coords[0])
+        nrm = np.array([-long_v[1], long_v[0]])
+        start = c + long_v * (hl + 1)
+        base = int(world.h(int(start[0]), int(start[1])))
+        for k in range(0, 18):
+            for side in (-1, 1):
+                p = start + long_v * k + nrm * side * (hs + 0.5)
+                x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+                if not g.inside(x, z) or world.occupied[z - g.z0, x - g.x0]:
+                    continue
+                top = base + 10 - int(k * 0.45) - int(rnd.integers(0, 3))
+                for y in range(int(world.h(x, z)) - 1, top):
+                    window = 4 <= y - base <= 6 and k % 5 in (2, 3)
+                    world.edits.set(x, y, z, "air" if window else mats[rnd.integers(len(mats))])
+                world.occupied[z - g.z0, x - g.x0] = True
+    # restaurant terrace on the lake side with tables, chairs and parasols
+    r = _row("building", "Burgrestaurant Gebhardsberg")
+    if r is not None:
+        rp = _bgeom(r)
+        c = np.asarray(rp.centroid.coords[0])
+        lake = np.argwhere(world.lake_mask[za:zb, xa:xb])
+        if len(lake):
+            lz, lx = lake.mean(axis=0)
+            d = np.array([lx + xa + g.x0 - c[0], lz + za + g.z0 - c[1]])
+        else:
+            d = np.array([-1.0, -1.0])
+        d /= np.linalg.norm(d) + 1e-9
+        nrm = np.array([-d[1], d[0]])
+        long_v, hs, hl = buildings._orientation(rp)
+        edge = max(hs, hl)
+        base = int(np.median(world.h(*np.round(c).astype(int))))
+        cells = set()
+        for a in np.arange(edge * 0.6, edge * 0.6 + 9, 0.5):
+            for o in np.arange(-edge * 0.8, edge * 0.8, 0.5):
+                p = c + d * a + nrm * o
+                cells.add((int(math.floor(p[0])), int(math.floor(p[1]))))
+        cells = {cl for cl in cells if g.inside(*cl) and not world.occupied[cl[1] - g.z0, cl[0] - g.x0]}
+        for (x, z) in cells:
+            hh = int(world.h(x, z))
+            for y in range(min(hh, base) - 1, base):
+                world.edits.set(x, y, z, "stone_bricks")
+            world.edits.set(x, base, z, "smooth_stone")
+            for y in range(base + 1, max(hh, base) + 3):
+                world.edits.set(x, y, z, "air")
+        border = {cl for cl in cells if any((cl[0] + dx, cl[1] + dz) not in cells for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
+        for (x, z) in border:
+            props = ",".join(f"{dn}={str((x + ddx, z + ddz) in border).lower()}" for dn, (ddx, ddz) in
+                             (("north", (0, -1)), ("south", (0, 1)), ("east", (1, 0)), ("west", (-1, 0))))
+            world.edits.set(x, base + 1, z, f"iron_bars[{props}]")
+        inner = sorted(cells - border)
+        for i, (x, z) in enumerate(inner[::23]):
+            world.edits.set(x, base + 1, z, "spruce_fence")
+            world.edits.set(x, base + 2, z, "spruce_pressure_plate")
+            for k, (dx, dz, f) in enumerate(((1, 0, "west"), (-1, 0, "east"))):
+                if (x + dx, z + dz) in cells and (x + dx, z + dz) not in border:
+                    world.edits.set(x + dx, base + 1, z + dz, f"spruce_stairs[facing={f},half=bottom]")
+            if i % 2 == 0:
+                world.edits.set(x, base + 3, z, "spruce_fence")
+                for ex in (-1, 0, 1):
+                    for ez in (-1, 0, 1):
+                        world.edits.set(x + ex, base + 4, z + ez, "white_wool" if ex == 0 or ez == 0 else "white_carpet")
+        for (x, z) in cells:
             world.occupied[z - g.z0, x - g.x0] = True
-    # a ruined keep stump
-    kx, kz = px + 20, pz - 18
-    hh = _ground(world, kx, kz)
-    v = Vox(kx - 5, hh - 3, kz - 5, 11, 20, 11)
-    v.hollow(kx - 4, hh - 2, kz - 4, kx + 4, hh + 9, kz + 4, "mossy_stone_bricks", "air")
-    for _ in range(40):
-        v.set(kx + rnd.integers(-4, 5), hh + rnd.integers(5, 10), kz + rnd.integers(-4, 5), "air")
-    v.commit(world.edits)
     _mark(world, "Burgruine Hohenbregenz / Gebhardsberg", px, _ground(world, px, pz) + 1, pz)
+    world.gebhardsberg_wall = n_wall
 
 
 def _lattice_line(v, p0, p1, block="waxed_exposed_copper_grate", thick=2):

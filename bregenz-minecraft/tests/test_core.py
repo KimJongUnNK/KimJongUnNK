@@ -190,3 +190,26 @@ def test_datapack_files(tmp_path):
     for b in BIOMES:
         ns, p = b.split(":")
         assert (root / f"data/{ns}/worldgen/biome/{p}.json").exists()
+
+
+# ------------------------------------------------------------- starter kit
+def test_map_colors_and_items(tmp_path):
+    from bregenz import mapitems
+    rgb = np.zeros((128, 128, 3), dtype=np.uint8)
+    rgb[:, :64] = (64, 64, 255)       # water
+    rgb[:, 64:] = (127, 178, 56)      # grass
+    cols = mapitems.map_colors(rgb).astype(np.uint8)
+    assert cols.size == 128 * 128
+    assert set(np.unique(cols // 4)) == {12, 1}  # WATER and GRASS base colours
+    targets = mapitems.teleport_targets({"Kunsthaus Bregenz (KUB)": (50, 427, -47), "Pfänder Gipfelkreuz": (2529, 1063, -313)})
+    assert targets[0][1] == "kunsthaus_bregenz_kub" and targets[1][1] == "pfaender_gipfelkreuz"
+    items = mapitems.inventory([{"id": 0, "name": "A"}], targets)
+    assert items[0]["id"] == "minecraft:filled_map" and items[-1]["id"] == "minecraft:written_book"
+    mapitems.write_functions(tmp_path, targets, 1)
+    tick = (tmp_path / "data/bregenz/function/tick.mcfunction").read_text()
+    assert "filled_map[minecraft:map_id=0]" in tick
+    assert (tmp_path / "data/bregenz/function/tp/pfaender_gipfelkreuz.mcfunction").read_text().startswith("tp @s 2529 1064 -313")
+    level.write_level(tmp_path, (1, 400, 2), (0.0, 0.0, 100.0), items)
+    with gzip.open(tmp_path / "level.dat") as f:
+        d = nbt.decode(f.read())[1]["Data"]
+    assert d["Player"]["Inventory"][0]["components"]["minecraft:map_id"] == 0

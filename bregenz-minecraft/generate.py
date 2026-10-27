@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bregenz import anvil, buildings, config, details, geo, landmarks, level, render, roads, terrain, vegetation
+from bregenz import anvil, buildings, config, details, geo, landmarks, level, mapitems, render, roads, terrain, vegetation
 from bregenz.world import BIOMES, World, build_chunk_blocks, chunk_biome_grid
 
 ROOT = Path(__file__).resolve().parent
@@ -149,11 +149,19 @@ def main(argv=None) -> int:
         log(f"profile chart skipped: {e!r}")
     markers = {k: list(map(int, v)) for k, v in sorted(world.markers.items(), key=lambda kv: kv[1][0])}
     stats["markers"] = markers
+    # starter kit: rendered maps + teleport book in the inventory, datapack keeps the map there
+    log("maps, teleport book and /function teleports")
+    maps = mapitems.render_maps(world, edits, out / "data")
+    targets = mapitems.teleport_targets(world.markers)
+    mapitems.write_functions(out / "datapacks" / "bregenz", targets, len(maps))
+    level.write_level(out, spawn, border, mapitems.inventory(maps, targets))
     (prev / "stats.json").write_text(json.dumps(stats, indent=2, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
     (out / "KOORDINATEN.txt").write_text(
-        "Bregenz 1:1 - Teleport-Befehle (Y = Meter ueber Adria, 0/0 = vorarlberg museum)\n\n"
-        + "\n".join(f"{k:45s} /tp @s {v[0]} {v[1] + 1} {v[2]}" for k, v in markers.items()) + "\n",
-        encoding="utf-8")
+        "Bregenz 1:1 - Teleports (Y = Meter ueber Adria, 0/0 = vorarlberg museum)\n"
+        "Alle Orte: /function bregenz:hilfe   |   alle Karten: /function bregenz:karten\n"
+        "Im Inventar: Karten + Buch 'Bregenz Teleporter' (Eintrag anklicken = teleportieren)\n\n"
+        + "\n".join(f"{name:42s} /function bregenz:tp/{sl:38s} /tp @s {x} {y} {z}" for name, sl, (x, y, z) in targets)
+        + "\n", encoding="utf-8")
 
     if not args.no_zip:
         zpath = out.parent / f"{out.name}.zip"

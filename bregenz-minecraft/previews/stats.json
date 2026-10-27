@@ -41,7 +41,7 @@
     "harbour_detail"
   ],
   "landmarks_failed": [],
-  "street_lamps": 3168,
+  "street_lamps": 3164,
   "details": {
     "benches": 191,
     "bins": 128,
@@ -57,12 +57,13 @@
     "masts": 38,
     "pitches": 65,
     "playgrounds": 30,
-    "bike_racks": 28
+    "bike_racks": 28,
+    "stadiums": 1
   },
-  "trees": 291041,
-  "plants": 2728881,
-  "edits": 73675160,
-  "block_states": 233,
+  "trees": 290922,
+  "plants": 2727166,
+  "edits": 79845958,
+  "block_states": 279,
   "spawn": [
     12,
     398,
@@ -135,15 +136,15 @@
       398,
       -38
     ],
-    "Wallfahrtskirche Gebhardsberg": [
-      59,
-      599,
-      1626
-    ],
     "St. Gallus": [
       71,
       472,
       677
+    ],
+    "Wallfahrtskirche Gebhardsberg": [
+      77,
+      592,
+      1636
     ],
     "Pfarrkirche St. Gallus": [
       105,
@@ -192,7 +193,7 @@
     ],
     "Herz-Jesu-Kirche": [
       264,
-      485,
+      479,
       261
     ],
     "Herz-Jesu-Kirche (Schild)": [
