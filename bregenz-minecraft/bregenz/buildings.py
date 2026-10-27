@@ -26,6 +26,10 @@ FACADES_WORK = [("light_gray_concrete", 3), ("smooth_stone", 2), ("gray_concrete
 ROOFS = [(("bricks", "brick_slab[type=bottom]"), 4), (("deepslate_tiles", "deepslate_tile_slab[type=bottom]"), 3),
          (("red_nether_bricks", "red_nether_brick_slab[type=bottom]"), 1), (("spruce_planks", "spruce_slab[type=bottom]"), 1),
          (("mud_bricks", "mud_brick_slab[type=bottom]"), 1)]
+ROOF_STAIRS = {"bricks": "brick_stairs", "deepslate_tiles": "deepslate_tile_stairs", "red_nether_bricks": "red_nether_brick_stairs",
+               "spruce_planks": "spruce_stairs", "mud_bricks": "mud_brick_stairs", "granite": "granite_stairs",
+               "dark_oak_planks": "dark_oak_stairs", "oxidized_cut_copper": "oxidized_cut_copper_stairs",
+               "oak_planks": "oak_stairs"}
 WORK = {"industrial", "commercial", "retail", "warehouse", "office", "service", "garages", "garage", "sports_hall",
         "school", "hospital", "parking", "transportation", "public", "civic"}
 SMALL = {"garage", "shed", "hut", "carport", "kiosk", "shelter", "cabin", "toilets"}
@@ -184,7 +188,7 @@ def building(world: World, r: dict, poly, style: dict) -> dict | bool:
     v = Vox(x0, low, z0, m.shape[1], top_y - low + 2, m.shape[0])
     a = v.a
     mT = m.T
-    per = mT & ~ndimage.binary_erosion(mT, structure=[[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+    per = mT & ~ndimage.binary_erosion(mT, structure=np.ones((3, 3)))  # 8-connected: no diagonal cracks
     inner = mT & ~per
     yb = base - low
     yt = wall_top - low
@@ -240,6 +244,11 @@ def building(world: World, r: dict, poly, style: dict) -> dict | bool:
         posts = per & ((along % 3 == 0) | ~(ew | ns))
         a[:, yb + 1:yt + 1, :][np.broadcast_to(posts[:, None, :], a[:, yb + 1:yt + 1, :].shape)] = post
 
+    # shutters on part of the homes (typical for Vorarlberg)
+    if windows == "normal" and cls in ("house", "detached", "residential", "apartments", "") and not small \
+            and (key >> 23) % 3 == 0 and "shutter" not in style:
+        windows = "shutters"
+        style = dict(style, shutter=_pick([("green_terracotta", 3), ("brown_terracotta", 2), ("gray_terracotta", 1)], key >> 25))
     if windows != "none":
         for fy in floors:
             if windows == "tall":
@@ -259,6 +268,19 @@ def building(world: World, r: dict, poly, style: dict) -> dict | bool:
                     cols = (along % 4 == 1) | (along % 4 == 2)
                 a[:, wy, :][ew & cols] = pane_ew
                 a[:, wy, :][ns & cols] = pane_ns
+
+    # cornice band on plastered houses
+    plastered = facade in ("white_terracotta", "white_concrete", "smooth_sandstone", "calcite", "yellow_terracotta",
+                           "smooth_quartz", "light_gray_concrete")
+    if plastered and not small and not style.get("fachwerk") and style.get("trim", True) and h > 7:
+        trim = "stone_bricks" if facade != "smooth_sandstone" else "sandstone"
+        row = a[:, yt, :]
+        row[per & (row == F)] = B(trim)
+
+    # metal lamella screen (vertical fins) over the upper floors
+    if style.get("lamellas"):
+        fins = (ew | ns) & (along % 2 == 0)
+        a[:, yb + 4:yt + 1, :][np.broadcast_to(fins[:, None, :], a[:, yb + 4:yt + 1, :].shape)] = B("iron_bars")
 
     # door towards the nearest street
     straight = ew | ns
@@ -286,22 +308,75 @@ def building(world: World, r: dict, poly, style: dict) -> dict | bool:
     if roof_surface is None:
         a[:, ry0, :][mT] = B(style.get("flat_roof", "smooth_stone" if not small else "spruce_slab[type=bottom]"))
         if not small:
-            if style.get("green_roof", (key >> 13) % 5 == 0):
-                a[:, ry0, :][inner] = B("moss_block")
+            if style.get("green_roof", (key >> 13) % 7 == 0 and area > 120):
+                core = ndimage.binary_erosion(mT, iterations=2)
+                a[:, ry0, :][inner] = B("gravel")
+                a[:, ry0, :][core] = B("moss_block")
+                tufts = core & ((np.arange(mT.shape[0])[:, None] * 7 + np.arange(mT.shape[1])[None, :] * 3) % 11 == 0)
+                a[:, ry0 + 1, :][tufts] = B("short_grass")
             if style.get("parapet", True):
                 a[:, ry0 + 1, :][per] = B(style.get("parapet_block", "stone_brick_slab[type=bottom]"))
+            # roof furniture: AC boxes, skylights, stair/elevator housing
+            ins = np.argwhere(ndimage.binary_erosion(mT, iterations=2))
+            if len(ins):
+                rng = np.random.default_rng(key & 0xFFFF)
+                for k in range(min(4, len(ins) // 40 + 1)):
+                    cx, cz = ins[rng.integers(len(ins))]
+                    a[cx, ry0 + 1, cz] = B("iron_block" if k % 2 == 0 else "light_gray_concrete")
+                    if k % 2 == 0 and cx + 1 < mT.shape[0] and mT[cx + 1, cz]:
+                        a[cx + 1, ry0 + 1, cz] = B("iron_block")
+                for k in range(min(3, len(ins) // 60)):
+                    cx, cz = ins[rng.integers(len(ins))]
+                    a[cx, ry0, cz] = B("glass")
+                if len(ins) > 120 and h > 12:
+                    cx, cz = ins[len(ins) // 2]
+                    a[max(cx - 1, 0):cx + 2, ry0 + 1:ry0 + 3, max(cz - 1, 0):cz + 2] = B("light_gray_concrete")
     else:
         rz = roof_surface.T
+        R = np.floor(rz).astype(int)
+        R[~mT] = -10
         RB, RS = B(roof_blk), B(roof_slab)
+        stair_name = ROOF_STAIRS.get(roof_blk, roof_blk.split("[")[0] + "_stairs")
+        Rp = np.pad(R, 1, constant_values=-10)
+        nb = {"east": Rp[2:, 1:-1], "west": Rp[:-2, 1:-1], "south": Rp[1:-1, 2:], "north": Rp[1:-1, :-2]}
         for cx, cz in zip(mx, mz):
-            hgt = rz[cx, cz]
-            full = int(math.floor(hgt))
-            lo = max(0, full - 1)
+            full = int(R[cx, cz])
             if per[cx, cz] and full > 0:  # gable / end walls up to the roof
                 a[cx, ry0:ry0 + full, cz] = F
+            inside_nb = [int(arr[cx, cz]) for arr in nb.values() if int(arr[cx, cz]) > -10]
+            low_nb = min(inside_nb) if inside_nb else full
+            lo = max(0, min(full - 1, low_nb))
             a[cx, ry0 + lo:ry0 + full + 1, cz] = RB
-            if hgt - full >= 0.5:
+            # smooth the steps: a stair climbing towards the higher neighbour
+            best, bdir = full, None
+            for dname, arr in nb.items():
+                hv = int(arr[cx, cz])
+                if hv > best:
+                    best, bdir = hv, dname
+            if bdir is not None:
+                a[cx, ry0 + full + 1, cz] = B(f"{stair_name}[facing={bdir},half=bottom]")
+            elif rz[cx, cz] - full >= 0.5:
                 a[cx, ry0 + full + 1, cz] = RS
+        # eaves: upside-down stairs one block out from the walls
+        out = ndimage.binary_dilation(mT, structure=[[0, 1, 0], [1, 1, 1], [0, 1, 0]]) & ~mT
+        ex_, ez_ = np.nonzero(out)
+        for cx, cz in zip(ex_, ez_):
+            gx_, gz_ = cx + x0, cz + z0
+            if g.inside(gx_, gz_) and world.occupied[gz_ - g.z0, gx_ - g.x0]:
+                continue
+            for dname, (ddx, ddz) in (("east", (1, 0)), ("west", (-1, 0)), ("south", (0, 1)), ("north", (0, -1))):
+                qx, qz = cx + ddx, cz + ddz
+                if 0 <= qx < mT.shape[0] and 0 <= qz < mT.shape[1] and mT[qx, qz] and R[qx, qz] == 0:
+                    a[cx, ry0, cz] = B(f"{stair_name}[facing={dname},half=bottom]")
+                    break
+        # chimney near the ridge
+        if area > 40 and (key >> 19) % 3 != 0:
+            cand = np.argwhere(mT & (R >= max(1, R.max() - 2)) & ~per)
+            if len(cand):
+                cx, cz = cand[(key >> 7) % len(cand)]
+                top_c = ry0 + int(R[cx, cz]) + 3
+                a[cx, ry0:top_c + 1, cz] = B("bricks")
+                a[cx, top_c, cz] = B("stone_brick_slab[type=bottom]")
     v.commit(world.edits)
     world.occupied[iz[ok], ix[ok]] = True
     return {"base": base, "wall_top": wall_top, "roof_top": wall_top + 1 + int(math.ceil(roof_h)), "door": door,

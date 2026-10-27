@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bregenz import anvil, buildings, config, geo, landmarks, level, render, roads, terrain, vegetation
+from bregenz import anvil, buildings, config, details, geo, landmarks, level, render, roads, terrain, vegetation
 from bregenz.world import BIOMES, World, build_chunk_blocks, chunk_biome_grid
 
 ROOT = Path(__file__).resolve().parent
@@ -79,6 +79,7 @@ def main(argv=None) -> int:
     stats.update(buildings.build(world, landmarks.exclusion_zones(), landmarks.styles_for(world), log))
     stats.update(landmarks.build(world, log))
     stats["street_lamps"] = roads.street_lamps(world)
+    stats.update(details.build(world, log))
     stats.update(vegetation.build(world, log))
     log(f"edits: {world.edits.count:,} block placements, sorting by chunk")
     edits = world.edits.finalize(grid)
@@ -128,12 +129,12 @@ def main(argv=None) -> int:
     overview = full.resize((full.width // 3, full.height // 3), render.Image.LANCZOS)
     render.annotate(overview, world, 3).save(prev / "map_overview.png")
     # 1:1 detail renders
-    details = {
+    crops = {
         "map_innenstadt_1zu1.png": (-820, -380, 520, 520),      # Seebühne .. Oberstadt
         "map_oberstadt_1zu1.png": (-60, 300, 360, 800),
         "map_pfaender_gipfel_1zu1.png": (2150, -520, 2750, 120),
     }
-    for name, (x0, z0, x1, z1) in details.items():
+    for name, (x0, z0, x1, z1) in crops.items():
         x0, x1 = max(x0, grid.x0), min(x1, grid.x1)
         z0, z1 = max(z0, grid.z0), min(z1, grid.z1)
         if x1 - x0 < 50 or z1 - z0 < 50:

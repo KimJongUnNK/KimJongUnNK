@@ -205,6 +205,12 @@ def _materials(world: World, E, lake, flowing, pools) -> None:
     rock = mask_of(lambda r: r["subtype"] == "rock" and r["class"] != "shingle")
     wet = mask_of(lambda r: r["subtype"] == "wetland")
     cliffs = raster.lines([r["geom"] for r in land if r["class"] == "cliff"], g, 4).astype(bool)
+    open_land = raster.polygons([r["geom"] for r in data.overture("land_use")
+                                 if r["class"] in ("meadow", "grass", "farmland", "orchard", "pitch", "farmyard",
+                                                   "allotments", "vineyard", "winter_sports", "hike")], g).astype(bool)
+    open_land |= raster.polygons([r["geom"] for r in land if r["subtype"] in ("grass", "shrub")], g).astype(bool)
+    osm_forest = mask_of(lambda r: r["subtype"] == "forest")
+    forest = osm_forest | (forest & ~open_land)
     world.forest_mask = forest & ~lake
 
     lu = data.overture("land_use")

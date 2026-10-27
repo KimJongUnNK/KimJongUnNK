@@ -9,6 +9,7 @@ import math
 
 import numpy as np
 import shapely
+import shapely.ops
 from scipy import ndimage
 
 from . import buildings, config, data, geo, raster
@@ -140,8 +141,7 @@ STYLES = {
                                      flat=False, gable=True, height=13, windows="tall", floor_h=10, floors=False),
     "Talstation": dict(facade="light_gray_concrete", flat=True, height=12, glass="light_blue_stained_glass_pane", shop=True,
                        green_roof=False),
-    "Bergstation": dict(facade="light_gray_concrete", flat=True, height=9, glass="light_blue_stained_glass_pane", shop=True,
-                        green_roof=False),
+    "Bergstation": dict(skip=True),             # custom (pfaenderbahn)
     "vorarlberg museum": dict(skip=True),       # custom
     "Kunsthaus Bregenz": dict(skip=True),       # custom
     "Martinsturm Bregenz": dict(skip=True),     # custom
@@ -149,6 +149,9 @@ STYLES = {
     "Haupttribüne": dict(skip=True),            # custom
     "Herz Jesu-Kirche": dict(skip=True),        # custom
     "Post Filiale 6900": dict(skip=True),       # custom (Hauptpost am Hafen)
+    "Bregenz Busbahnhof": dict(skip=True),     # custom: bus canopy + station building (bahnhof())
+    "Haus am Hafen": dict(skip=True),           # custom (Sutterlüty cubes, kreisverkehr_schillerstrasse)
+    "Casino Bregenz": dict(skip=True),          # custom (two domes)
 }
 
 
@@ -158,11 +161,21 @@ def styles_for(world: World):
     harb = [raster.to_block_geom(r["geom"]) for r in data.overture("water") if r["name"] == "Hafen Bregenz"
             and r["geom"].geom_type in ("Polygon", "MultiPolygon")]
     hzone = harb[0].buffer(45) if harb else None
+    station = shapely.Point(*geo.place(47.502944, 9.739917)).buffer(90)
+    roundabout = shapely.Point(*geo.place(47.505944, 9.749500))
 
     def style(r):
         s = STYLES.get(r["name"])
         if s is not None:
             return dict(s)
+        if r.get("class") == "roof" and station is not None and raster.to_block_geom(r["geom"]).intersects(station):
+            return dict(skip=True)  # platform canopies: built by bahnhof()
+        if r.get("class") == "school" and r["name"] is None and raster.to_block_geom(r["geom"]).distance(roundabout) < 40:
+            # HTL Bregenz: grey building behind a metal lamella screen
+            return dict(facade="light_gray_concrete", flat=True, height=18, glass="light_gray_stained_glass_pane",
+                        green_roof=False, lamellas=True)
+        if r.get("class") == "office" and raster.to_block_geom(r["geom"]).distance(roundabout) < 45:
+            return dict(facade="light_gray_concrete", flat=True, height=11, glass="glass_pane", shop=True, green_roof=False)
         if hzone is not None and (r.get("roof_shape") == "pyramidal" or (r.get("class") in ("retail", "kiosk") and r["name"] is None)):
             p = raster.to_block_geom(r["geom"])
             if p.within(hzone) and 100 < p.area < 900:
@@ -190,7 +203,7 @@ def exclusion_zones() -> shapely.Geometry:
 def build(world: World, log=print) -> dict:
     done, failed = [], []
     for fn in (kunsthaus, vorarlberg_museum, martinsturm, seebuehne, fischersteg, piers, mili_bridge, st_gallus_tower,
-               unteres_tor_passage, herz_jesu, hauptpost, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
+               unteres_tor_passage, herz_jesu, hauptpost, bahnhof, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
                harbour_detail):
         try:
             fn(world)
@@ -813,6 +826,242 @@ def hauptpost(world: World) -> None:
     _mark(world, "Hauptpost", mx, top + 16, nz)
 
 
+def bahnhof(world: World) -> None:
+    """Bahnhof Bregenz: platform canopies with teal (copper) roofs and the footbridge over the tracks."""
+    g = world.grid
+    station = shapely.Point(*geo.place(47.502944, 9.739917)).buffer(90)
+    n = 0
+    for r in data.overture("building"):
+        if r.get("class") != "roof":
+            continue
+        p = _bgeom(r)
+        if not p.intersects(station) or p.area < 200:
+            continue
+        m, x0, z0 = raster.polygon_cells(p)
+        zz, xx = np.nonzero(m)
+        X, Z = xx + x0, zz + z0
+        ok = g.inside(X, Z)
+        X, Z = X[ok], Z[ok]
+        base = int(np.median(world.h(X, Z)))
+        y = base + 5
+        long_v, hs, hl = buildings._orientation(p)
+        c = np.asarray(p.centroid.coords[0])
+        nrm = np.array([-long_v[1], long_v[0]])
+        for x, z in zip(X, Z):
+            q = np.array([x + 0.5, z + 0.5]) - c
+            across = abs(q @ nrm)
+            # gently arched roof: higher along the middle
+            world.edits.set(int(x), y + (1 if across < hs * 0.45 else 0), int(z),
+                            "oxidized_cut_copper_slab[type=bottom]" if across < hs * 0.8 else "white_concrete")
+            along = q @ long_v
+            if across < 0.8 and int(round(along)) % 9 == 0:
+                for yy in range(int(world.h(x, z)) + 1, y + 1):
+                    world.edits.set(int(x), yy, int(z), "white_concrete")
+        n += 1
+    # bus station: open canopy on white columns + the station building (white, teal roofs) next to the tracks
+    bb = _row("building", "Bregenz Busbahnhof")
+    if bb is not None:
+        p = _bgeom(bb)
+        m, x0, z0 = raster.polygon_cells(p)
+        zz, xx = np.nonzero(m)
+        X, Z = xx + x0, zz + z0
+        ok = g.inside(X, Z)
+        X, Z = X[ok], Z[ok]
+        base = int(np.median(world.h(X, Z)))
+        for x, z in zip(X, Z):
+            world.edits.set(int(x), base + 7, int(z), "oxidized_cut_copper_slab[type=bottom]")
+            if x % 10 == 0 and z % 10 == 0:
+                for yy in range(int(world.h(x, z)) + 1, base + 7):
+                    world.edits.set(int(x), yy, int(z), "white_concrete")
+        rails = [raster.to_block_geom(r["geom"]) for r in data.overture("segment") if r["subtype"] == "rail"]
+        rl = shapely.union_all(rails) if rails else None
+        if rl is not None:
+            q = shapely.ops.nearest_points(rl, p.centroid)[0]
+            cpt = shapely.ops.nearest_points(p, q)[0]
+            sc = np.asarray(cpt.coords[0]) + (np.asarray(p.centroid.coords[0]) - np.asarray(cpt.coords[0])) * 0.25
+            seg = max(getattr(rl, "geoms", [rl]), key=lambda l: -l.distance(q))
+            d0 = seg.project(q)
+            a_ = np.asarray(seg.interpolate(max(d0 - 10, 0)).coords[0])
+            b_ = np.asarray(seg.interpolate(min(d0 + 10, seg.length)).coords[0])
+            t = (b_ - a_) / (np.linalg.norm(b_ - a_) + 1e-9)
+            box = shapely.Polygon([tuple(sc + t * u + np.array([-t[1], t[0]]) * w) for u, w in
+                                   ((-17, -8), (17, -8), (17, 8), (-17, 8))])
+            row = {"id": "bahnhof-empfang", "geom": None, "name": "Bahnhof Bregenz"}
+            buildings.building(world, row, box, dict(facade="white_concrete", roof=("oxidized_cut_copper", "oxidized_cut_copper_slab[type=bottom]"),
+                                                     flat=False, gable=False, pitch=0.6, height=15, wall_height=10,
+                                                     glass="light_blue_stained_glass_pane", shop=True, windows="normal"))
+        _occupy(world, p)
+
+    # footbridge across the tracks, from the station building towards the lake side
+    if bb is not None:
+        rails = [raster.to_block_geom(r["geom"]) for r in data.overture("segment") if r["subtype"] == "rail"
+                 and r["geom"].intersects(shapely.box(9.7385, 47.5022, 9.7415, 47.5037))]
+        if rails:
+            rl = shapely.union_all(rails)
+            sc = _bgeom(bb).centroid
+            near = shapely.ops.nearest_points(sc, rl)[1]
+            # local track direction
+            seg = max(getattr(rl, "geoms", [rl]), key=lambda l: -l.distance(near))
+            d0 = seg.project(near)
+            a_ = np.asarray(seg.interpolate(max(d0 - 10, 0)).coords[0])
+            b_ = np.asarray(seg.interpolate(min(d0 + 10, seg.length)).coords[0])
+            t = (b_ - a_) / (np.linalg.norm(b_ - a_) + 1e-9)
+            nrm = np.array([-t[1], t[0]])
+            start = np.asarray(near.coords[0])
+            if (np.asarray(sc.coords[0]) - start) @ nrm > 0:
+                nrm = -nrm
+            start = start - nrm * 14  # start on the station side
+            deck = int(world.h(int(start[0]), int(start[1]))) + 8
+            L = 46
+            for k in np.arange(0, L, 0.5):
+                for o in (-1.5, -0.5, 0.5, 1.5):
+                    p_ = start + nrm * k + t * o
+                    x, z = int(math.floor(p_[0])), int(math.floor(p_[1]))
+                    world.edits.set(x, deck, z, "smooth_stone")
+                    world.edits.set(x, deck + 4, z, "oxidized_cut_copper_slab[type=bottom]")
+                    edge = abs(o) > 1
+                    for yy in (deck + 1, deck + 2, deck + 3):
+                        world.edits.set(x, yy, z, "light_blue_stained_glass" if edge and yy > deck + 1 else
+                                        ("oxidized_cut_copper" if edge else "air"))
+                if int(k * 2) % 24 == 0:
+                    for o in (-1.5, 1.5):
+                        p_ = start + nrm * k + t * o
+                        x, z = int(math.floor(p_[0])), int(math.floor(p_[1]))
+                        for yy in range(int(world.h(x, z)) + 1, deck):
+                            world.edits.set(x, yy, z, "white_concrete")
+            # stair tower at the lake end (round glass tower in the aerial photo)
+            e = start + nrm * L
+            ex, ez = int(e[0]), int(e[1])
+            hh = int(world.h(ex, ez))
+            v = Vox(ex - 5, hh - 1, ez - 5, 11, deck - hh + 8, 11)
+            for yy in range(hh + 1, deck + 4):
+                v.disk(ex, ez, yy, 4, "light_blue_stained_glass" if (yy - hh) % 4 else "white_concrete", filled=False)
+            v.disk(ex, ez, deck + 4, 4, "oxidized_cut_copper")
+            v.commit(world.edits)
+    sx, sz = geo.place(47.502944, 9.739917)
+    _mark(world, "Bahnhof Bregenz (Bahnsteige)", sx, world.surface(sx, sz), sz)
+
+
+def casino(world: World) -> None:
+    """Casino Bregenz next to the Festspielhaus: low building with two shallow grey domes."""
+    r = _row("building", "Casino Bregenz")
+    if r is None:
+        return
+    p = _bgeom(r)
+    info = buildings.building(world, r, p, dict(facade="light_gray_concrete", flat=True, height=12, green_roof=False,
+                                                glass="gray_stained_glass_pane", shop=True))
+    if not info:
+        return
+    top = info["wall_top"]
+    long_v, hs, hl = buildings._orientation(p)
+    c = np.asarray(p.centroid.coords[0])
+    for side in (-1, 1):
+        dc = c + long_v * side * hl * 0.45
+        cx, cz = int(dc[0]), int(dc[1])
+        R = min(11.0, hs * 0.8)
+        v = Vox(cx - 13, top, cz - 13, 27, 14, 27)
+        for dy in range(0, int(R * 0.55) + 1):
+            rr = math.sqrt(max(R * R - (dy / 0.55) ** 2, 0))
+            v.disk(cx, cz, top + 1 + dy, rr, "light_gray_concrete" if dy % 3 else "gray_stained_glass", filled=False)
+        v.disk(cx, cz, top + 1 + int(R * 0.55), 2, "glass")
+        v.commit(world.edits)
+    _mark(world, "Casino Bregenz", c[0], top + 2, c[1])
+
+
+def kreisverkehr_schillerstrasse(world: World) -> None:
+    """Roundabout at Schillerstrasse: planted island; Sutterlüty ground floor (pink posters) at the Haus am Hafen."""
+    x, z = geo.place(47.505944, 9.749500)
+    g = world.grid
+    rnd = np.random.default_rng(7)
+    for dx in range(-6, 7):
+        for dz in range(-6, 7):
+            d = math.hypot(dx, dz)
+            px, pz = x + dx, z + dz
+            if d <= 5.5 and g.inside(px, pz):
+                iz, ix = pz - g.z0, px - g.x0
+                world.top[iz, ix] = B("grass_block")
+                world.road[iz, ix] = False
+                world.occupied[iz, ix] = True
+                hh = int(world.H[iz, ix])
+                k = rnd.random()
+                if d > 4.4:
+                    world.edits.set(px, hh, pz, "stone_bricks")  # kerb
+                elif k < 0.25:
+                    world.edits.set(px, hh + 1, pz, "flowering_azalea")
+                elif k < 0.6:
+                    world.edits.set(px, hh + 1, pz, ["red_tulip", "pink_tulip", "allium", "oxeye_daisy"][int(k * 40) % 4])
+                else:
+                    world.edits.set(px, hh + 1, pz, "short_grass")
+    world.edits.set(x, int(world.h(x, z)) + 1, z, "azalea")
+    _sutterluety(world)
+    _mark(world, "Kreisverkehr Schillerstrasse", x, int(world.h(x, z)) + 1, z)
+
+
+def _sutterluety(world: World) -> None:
+    """Haus am Hafen: green-tinted glass ground floor (Sutterlüty Ländlemarkt) under dark wood-clad cubes on
+    columns, strip windows with blinds, shrubs on the roofs."""
+    r = _row("building", "Haus am Hafen")
+    if r is None:
+        return
+    poly = _bgeom(r)
+    long_v, hs_, hl = buildings._orientation(poly)
+    c = np.asarray(poly.centroid.coords[0])
+    m, x0, z0 = raster.polygon_cells(poly)
+    mT = m.T
+    xs, zs = np.nonzero(mT)
+    X, Z = xs + x0, zs + z0
+    base = int(np.median(world.h(X, Z)))
+    per = mT & ~ndimage.binary_erosion(mT, structure=[[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+    along = (np.column_stack([X + 0.5, Z + 0.5]) - c) @ long_v
+    # the upper storeys are separate cubes ~26 long with 7-block gaps; the cube edges are their own walls
+    seg = np.floor((along + hl) / 33).astype(int)
+    pos = (along + hl) - seg * 33
+    in_cube = pos < 26
+    cube_id = np.where(in_cube, seg, -1)
+    cmap = np.full(mT.shape, -1, dtype=int)
+    cmap[xs, zs] = cube_id
+    pc = np.pad(cmap, 1, constant_values=-1)
+    cube_edge = in_cube & ((pc[2:, 1:-1][xs, zs] != cube_id) | (pc[:-2, 1:-1][xs, zs] != cube_id) |
+                           (pc[1:-1, 2:][xs, zs] != cube_id) | (pc[1:-1, :-2][xs, zs] != cube_id))
+    v = Vox(x0 - 2, base - 3, z0 - 2, m.shape[1] + 4, 30, m.shape[0] + 4)
+    g1, top = base + 5, base + 18
+    for i, (x, z) in enumerate(zip(X, Z)):
+        edge = per[x - x0, z - z0]
+        v.column(x, z, int(world.h(x, z)) + 1, base - 1, "stone")
+        v.set(x, base, z, "polished_andesite")
+        # ground floor: green glass curtain wall, columns every 8 blocks
+        for y in range(base + 1, g1):
+            if edge:
+                v.set(x, y, z, "light_gray_concrete" if int(pos[i]) % 8 == 0 else "green_stained_glass")
+            else:
+                v.set(x, y, z, "light[level=15]" if (y == base + 4 and x % 6 == 0 and z % 6 == 0) else "air")
+        v.set(x, g1, z, "gray_concrete")
+        if not in_cube[i]:
+            v.set(x, g1 + 1, z, "smooth_stone" if not edge else "gray_concrete")
+            continue
+        # dark wood cubes with strip windows + blinds
+        for y in range(g1 + 1, top):
+            rel = y - g1
+            if cube_edge[i]:
+                if rel % 4 == 2:
+                    blk = "gray_stained_glass" if int(pos[i]) % 5 else "dark_oak_planks"
+                elif rel % 4 == 3:
+                    blk = "iron_bars" if int(pos[i]) % 5 else "dark_oak_planks"
+                else:
+                    blk = "dark_oak_planks"
+            else:
+                blk = "spruce_planks" if rel % 4 == 0 else ("light[level=13]" if (rel % 4 == 2 and x % 6 == 0 and z % 6 == 0) else "air")
+            v.set(x, y, z, blk)
+        v.set(x, top, z, "smooth_stone" if not cube_edge[i] else "dark_oak_planks")
+        if cube_edge[i] and (x + z) % 3 == 0:
+            v.set(x, top + 1, z, "azalea_leaves[persistent=true]")
+            if (x + z) % 6 == 0:
+                v.set(x, top + 2, z, "azalea_leaves[persistent=true]")
+    v.commit(world.edits)
+    _occupy(world, poly)
+    _mark(world, "Sutterlüty / Haus am Hafen", c[0], top + 1, c[1])
+
+
 def unteres_tor_passage(world: World) -> None:
     """Cut the gate passage through the Unteres Tor (the street climbs into the Oberstadt here)."""
     r = _row("building", "Unteres Tor")
@@ -863,24 +1112,178 @@ def gebhardsberg_ruin(world: World) -> None:
     _mark(world, "Burgruine Hohenbregenz / Gebhardsberg", px, _ground(world, px, pz) + 1, pz)
 
 
+def _lattice_line(v, p0, p1, block="waxed_exposed_copper_grate", thick=2):
+    """A square lattice member between two points (thick x thick cross-section)."""
+    for dx in range(thick):
+        for dz in range(thick):
+            v.line((p0[0] + dx, p0[1], p0[2] + dz), (p1[0] + dx, p1[1], p1[2] + dz), block)
+
+
+def _pylon(world: World, x: int, z: int, gnd: int, top: int, n, half_top: float) -> None:
+    """Pfänderbahn support: brown steel lattice portal, legs splayed across the line, wide cross beam on top."""
+    spread = half_top + (top - gnd) * 0.18
+    v = Vox(x - 16, gnd - 4, z - 16, 33, top - gnd + 10, 33)
+    for side in (-1, 1):
+        b = (int(round(x + n[0] * spread * side)), gnd - 2, int(round(z + n[1] * spread * side)))
+        t = (int(round(x + n[0] * (half_top - 1) * side)), top - 1, int(round(z + n[1] * (half_top - 1) * side)))
+        v.fill(b[0] - 1, gnd - 3, b[2] - 1, b[0] + 2, gnd, b[2] + 2, "gray_concrete")  # footing
+        _lattice_line(v, b, t)
+    # horizontal braces every 7 blocks + X bracing between the legs
+    for y in range(gnd + 7, top - 2, 7):
+        f = (y - gnd) / max(top - gnd, 1)
+        w = spread + (half_top - 1 - spread) * f
+        a = (x - n[0] * w, y, z - n[1] * w)
+        c = (x + n[0] * w, y, z + n[1] * w)
+        v.line(a, c, "waxed_exposed_copper_grate")
+    # cross beam with rope saddles
+    w = half_top + 2
+    for k in (0, 1):
+        v.line((x - n[0] * w, top + k, z - n[1] * w), (x + n[0] * w, top + k, z + n[1] * w), "waxed_exposed_copper_grate")
+    for o in (-3, -2, 2, 3):
+        v.set(int(round(x + n[0] * o)), top + 2, int(round(z + n[1] * o)), "polished_blackstone")
+    v.set(x, top + 2, z, "white_wool")  # wind sock post
+    v.column(x, z, top + 2, top + 4, "iron_bars")
+    v.set(x, top + 5, z, "red_wool")
+    v.commit(world.edits)
+    _occupy(world, shapely.Point(x, z).buffer(spread + 3))
+
+
+def _cabin(world: World, cx: int, cy: int, cz: int, along_x: bool) -> None:
+    """Pfänderbahn cabin: dark carriage on the ropes, curved cream hanger, blue/white glazed cabin."""
+    def P(a, b):  # a along the line, b across
+        return (cx + a, cz + b) if along_x else (cx + b, cz + a)
+    for a in (-2, -1, 0, 1, 2):
+        for b in (-2, 2):
+            x, z = P(a, b)
+            world.edits.set(x, cy - 1, z, "polished_blackstone")
+    for a in (-1, 0, 1):
+        x, z = P(a, 0)
+        world.edits.set(x, cy - 1, z, "polished_blackstone")
+    # hanger: single arm that splits into an inverted V onto the cabin roof
+    for y in range(cy - 7, cy - 1):
+        x, z = P(0, 0)
+        world.edits.set(x, y, z, "smooth_sandstone")
+    for k, y in enumerate(range(cy - 10, cy - 7)):
+        for a in (-(k + 1), k + 1):
+            x, z = P(a + (1 if a > 0 else -1) * 0, 0)
+            world.edits.set(x, y, z, "smooth_sandstone")
+    roof = cy - 11
+    floor = roof - 5
+    for a in range(-5, 6):
+        for b in range(-2, 3):
+            x, z = P(a, b)
+            edge_a, edge_b = abs(a) == 5, abs(b) == 2
+            for y in range(floor, roof + 1):
+                if y == roof:
+                    blk = "white_concrete"
+                elif y == floor:
+                    blk = "gray_concrete"
+                elif edge_a or edge_b:
+                    if y == floor + 1:
+                        blk = "blue_concrete" if a < 2 else "white_concrete"
+                    else:
+                        blk = "light_blue_stained_glass" if a < 2 else "glass"
+                else:
+                    blk = "air"
+                world.edits.set(x, y, z, blk)
+
+
+def _bergstation(world: World, u) -> tuple[int, int, int] | None:
+    """Bergstation: white cube with a glazed cable hall towards the lake, larch-shingle middle floor,
+    roof viewing terrace with railing and an outside stair."""
+    r = _row("building", "Bergstation")
+    if r is None:
+        return None
+    poly = _bgeom(r)
+    m, x0, z0 = raster.polygon_cells(poly)
+    mT = m.T
+    xs, zs = np.nonzero(mT)
+    X, Z = xs + x0, zs + z0
+    hs = world.h(X, Z)
+    base = int(hs.min())
+    top = base + 13
+    per = mT & ~ndimage.binary_erosion(mT, structure=[[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+    c = np.asarray(poly.centroid.coords[0])
+    # cells within 7 blocks of the face the cable arrives at (-u side)
+    hall = ((np.column_stack([X + 0.5, Z + 0.5]) - c) @ (-np.asarray(u))) > (np.ptp(X) / 2 - 7)
+    v = Vox(x0 - 4, base - 6, z0 - 4, m.shape[1] + 8, 30, m.shape[0] + 8)
+    for i, (x, z) in enumerate(zip(X, Z)):
+        v.column(x, z, min(int(hs[i]), base) - 4, base, "stone_bricks")
+        v.set(x, base, z, "smooth_stone")
+        edge = per[x - x0, z - z0]
+        for y in range(base + 1, top + 1):
+            rel = y - base
+            if not edge:
+                blk = "air"
+                if rel in (5, 9):
+                    blk = "smooth_stone" if not hall[i] else "air"
+            elif hall[i] and rel >= 5:
+                blk = "light_gray_stained_glass" if rel < 12 else "white_concrete"
+            elif rel in (5, 9, 13):
+                blk = "white_concrete"
+            elif 6 <= rel <= 8:  # larch-shingle clad restaurant floor with a window band
+                blk = "glass" if rel == 7 and (x + z) % 4 in (1, 2) else "oak_planks"
+            elif rel in (2, 3, 11) and (x + z) % 4 in (1, 2):
+                blk = "glass"
+            else:
+                blk = "white_concrete"
+            v.set(x, y, z, blk)
+        v.set(x, top + 1, z, "smooth_stone_slab[type=bottom]")
+    # roof terrace railing + blue "Pfänderbahn" band on the lake-facing upper wall
+    ring = {(int(x), int(z)) for x, z in zip(X, Z) if per[x - x0, z - z0]}
+    for (x, z) in ring:
+        props = {d: str((x + dx, z + dz) in ring).lower() for d, (dx, dz) in
+                 {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}.items()}
+        v.set(x, top + 2, z, "iron_bars[" + ",".join(f"{k}={vv}" for k, vv in props.items()) + "]")
+    lake_face = [(x, z) for (x, z) in ring if ((np.array([x + 0.5, z + 0.5]) - c) @ np.array([-1.0, 0.0])) > np.ptp(X) / 2 - 1.5]
+    for x, z in lake_face[2:-2]:
+        v.set(x, top - 2, z, "blue_concrete")
+    # outside stair to the terrace on the far side
+    far = max(ring, key=lambda p: (np.array([p[0] + 0.5, p[1] + 0.5]) - c) @ np.asarray(u))
+    fx, fz = far
+    sdir = (0, 1) if abs(u[0]) >= abs(u[1]) else (1, 0)
+    out = (1, 0) if abs(u[0]) >= abs(u[1]) else (0, 1)
+    out = (out[0] * (1 if u[0] >= 0 else -1), out[1] * (1 if u[1] >= 0 else -1))
+    facing = {(0, 1): "south", (0, -1): "north", (1, 0): "east", (-1, 0): "west"}[(-sdir[0], -sdir[1])]
+    for k in range(0, top - base + 1):
+        sx = fx + out[0] - sdir[0] * k
+        sz = fz + out[1] - sdir[1] * k
+        y = base + 1 + k
+        v.set(sx, y, sz, f"polished_andesite_stairs[facing={facing},half=bottom]")
+        v.set(sx + out[0], y + 1, sz + out[1], "iron_bars")
+    v.commit(world.edits)
+    _occupy(world, poly.buffer(2))
+    rope_x, rope_z = int(round(c[0] - u[0] * (np.ptp(X) / 2 - 2))), int(round(c[1] - u[1] * (np.ptp(Z) / 2 - 2)))
+    return rope_x, base + 10, rope_z
+
+
 def pfaenderbahn(world: World) -> None:
-    """Pfänderbahn: aerial tramway Talstation -> Bergstation with its two pylons and two cabins."""
+    """Pfänderbahn (1927, 1964): aerial tramway Talstation -> Bergstation with two lattice supports and two cabins."""
     rows = [r for r in data.overture("infrastructure") if r["class"] == "cable_car" and r["name"] == "Pfänderbahn"]
     if not rows:
         return
     line = _bgeom(rows[0])
     pts = [tuple(p) for p in np.asarray(line.coords)]
+    d_all = np.array(pts[-1]) - np.array(pts[0])
+    u = d_all / np.linalg.norm(d_all)
+    n = np.array([-u[1], u[0]])
+    along_x = abs(u[0]) >= abs(u[1])
+    axis = "x" if along_x else "z"
+    top_end = _bergstation(world, u)
     supports = []
     for i, (x, z) in enumerate(pts):
         gnd = _ground(world, x, z)
         if i == 0:
-            y = gnd + 11            # rope leaves the Talstation roof level
+            supports.append([x, gnd + 13, z, gnd])            # leaves the Talstation hall
         elif i == len(pts) - 1:
-            y = gnd + 9
+            if top_end:
+                supports.append([top_end[0], top_end[1], top_end[2], gnd])
+            else:
+                supports.append([x, gnd + 9, z, gnd])
         else:
-            y = gnd + 34            # pylons
-        supports.append([x, y, z, gnd])
-    # make sure every span clears the ground by at least 10 blocks (raise pylons if needed)
+            h = 34 if i == 1 else 21                          # tall mid-slope support, short portal near the top
+            supports.append([x, gnd + h, z, gnd])
+    # every span keeps at least 8 blocks of clearance (raise supports if the terrain is in the way)
     for _ in range(3):
         for i in range(len(supports) - 1):
             a, b = supports[i], supports[i + 1]
@@ -888,66 +1291,38 @@ def pfaenderbahn(world: World) -> None:
             for t in np.linspace(0, 1, int(L) + 1):
                 x = a[0] + (b[0] - a[0]) * t
                 z = a[2] + (b[2] - a[2]) * t
-                y = a[1] + (b[1] - a[1]) * t - 4 * L * 0.02 * t * (1 - t)
-                need = _ground(world, x, z) + 10
-                if y < need and 0 < i + 1 < len(supports) - 1:
-                    supports[i + 1][1] += int(need - y) + 1
-                elif y < need and i > 0:
-                    supports[i][1] += int(need - y) + 1
-    # ropes: two parallel track ropes 3 blocks apart
-    dx_all = pts[-1][0] - pts[0][0]
-    dz_all = pts[-1][1] - pts[0][1]
-    Lall = math.hypot(dx_all, dz_all)
-    nx_, nz_ = -dz_all / Lall, dx_all / Lall
-    axis = "x" if abs(dx_all) >= abs(dz_all) else "z"
-    rope_pts = {-1.5: [], 1.5: []}
+                y = a[1] + (b[1] - a[1]) * t - L * 0.06 * t * (1 - t)
+                need = _ground(world, x, z) + 8
+                if y < need:
+                    j = i + 1 if 0 < i + 1 < len(supports) - 1 else i
+                    if 0 < j < len(supports) - 1:
+                        supports[j][1] += int(need - y) + 1
+    # track ropes: two lanes (one per cabin), two ropes each
+    lane_pts = {-2.5: [], 2.5: []}
     for i in range(len(supports) - 1):
         a, b = supports[i], supports[i + 1]
         L = math.hypot(b[0] - a[0], b[2] - a[2])
         for t in np.linspace(0, 1, int(L * 1.5) + 2):
             x = a[0] + (b[0] - a[0]) * t
             z = a[2] + (b[2] - a[2]) * t
-            y = a[1] + (b[1] - a[1]) * t - 4 * L * 0.02 * t * (1 - t)
-            for o in rope_pts:
-                rx, rz = int(math.floor(x + nx_ * o)), int(math.floor(z + nz_ * o))
-                world.edits.set(rx, int(round(y)), rz, f"chain[axis={axis}]")
-                rope_pts[o].append((rx, int(round(y)), rz))
-    # pylons: white A-frame with a cross beam
+            y = int(round(a[1] + (b[1] - a[1]) * t - L * 0.06 * t * (1 - t)))
+            for lane in lane_pts:
+                for o in (lane - 0.5, lane + 0.5):
+                    rx, rz = int(math.floor(x + n[0] * o)), int(math.floor(z + n[1] * o))
+                    world.edits.set(rx, y, rz, f"chain[axis={axis}]")
+                lane_pts[lane].append((int(math.floor(x + n[0] * lane)), y, int(math.floor(z + n[1] * lane))))
     for (x, y, z, gnd) in supports[1:-1]:
-        x, z = int(round(x)), int(round(z))
-        v = Vox(x - 8, gnd - 2, z - 8, 17, y - gnd + 6, 17)
-        for side in (-1, 1):
-            v.line((x - nx_ * 6 * side, gnd + 1, z - nz_ * 6 * side), (x - nx_ * 2.5 * side, y - 1, z - nz_ * 2.5 * side), "white_concrete")
-            v.line((x - nx_ * 6 * side + 1, gnd + 1, z - nz_ * 6 * side), (x - nx_ * 2.5 * side + 1, y - 1, z - nz_ * 2.5 * side), "white_concrete")
-            v.fill(int(x - nx_ * 6 * side) - 1, gnd - 2, int(z - nz_ * 6 * side) - 1, int(x - nx_ * 6 * side) + 1, gnd, int(z - nz_ * 6 * side) + 1, "gray_concrete")
-        v.line((x - nx_ * 3, y - 1, z - nz_ * 3), (x + nx_ * 3, y - 1, z + nz_ * 3), "light_gray_concrete")
-        v.line((x - nx_ * 4, y - 12, z - nz_ * 4), (x + nx_ * 4, y - 12, z + nz_ * 4), "white_concrete")
-        v.set(x, y + 1, z, "red_concrete")
-        v.commit(world.edits)
-    # two cabins (they meet in the middle in reality; here one low, one high)
-    for o, frac in ((-1.5, 0.28), (1.5, 0.62)):
-        rp = rope_pts[o]
-        cx, cy, cz = rp[int(len(rp) * frac)]
-        v = Vox(cx - 4, cy - 14, cz - 4, 9, 16, 9)
-        v.column(cx, cz, cy - 5, cy - 1, "iron_bars")
-        v.fill(cx - 1, cy - 1, cz - 1, cx + 1, cy - 1, cz + 1, "iron_block")
-        top_y, bot_y = cy - 6, cy - 11
-        v.hollow(cx - 2, bot_y, cz - 3, cx + 2, top_y, cz + 3, "white_concrete", "air")
-        v.fill(cx - 2, bot_y + 1, cz - 3, cx + 2, bot_y + 1, cz + 3, "blue_concrete")
-        v.hollow(cx - 2, bot_y + 1, cz - 3, cx + 2, bot_y + 1, cz + 3, "blue_concrete", None)
-        for y in (bot_y + 2, bot_y + 3):
-            for d in (-2, -1, 0, 1, 2):
-                v.set(cx + d, y, cz - 3, "light_blue_stained_glass")
-                v.set(cx + d, y, cz + 3, "light_blue_stained_glass")
-            for d in (-2, -1, 0, 1, 2):
-                v.set(cx - 2, y, cz + d, "light_blue_stained_glass")
-                v.set(cx + 2, y, cz + d, "light_blue_stained_glass")
-        v.fill(cx - 1, bot_y + 1, cz - 2, cx + 1, bot_y + 1, cz + 2, "air")
-        v.fill(cx - 1, bot_y, cz - 2, cx + 1, bot_y, cz + 2, "gray_concrete")
-        v.commit(world.edits)
+        _pylon(world, int(round(x)), int(round(z)), gnd, int(y) - 2, n, 4.0)
+    # cabins: one just below the Bergstation, one lower down the other lane
+    for lane, frac in ((-2.5, 0.93), (2.5, 0.35)):
+        lp = lane_pts[lane]
+        cx, cy, cz = lp[int(len(lp) * frac)]
+        _cabin(world, cx, cy, cz, along_x)
     a, b = supports[0], supports[-1]
     _mark(world, "Pfänderbahn Talstation", a[0], a[3] + 1, a[2])
     _mark(world, "Pfänderbahn Bergstation", b[0], b[3] + 1, b[2])
+    for k, (x, y, z, gnd) in enumerate(supports[1:-1], 1):
+        _mark(world, f"Pfänderbahn Stütze {k}", x, gnd + 1, z)
 
 
 def sender(world: World) -> None:

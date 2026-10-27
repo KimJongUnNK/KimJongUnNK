@@ -124,17 +124,50 @@ def small_boat(world: World, c, u, kind: int) -> bool:
 
 
 def harbour_light(world: World, x: int, z: int, axis=(1, 0)) -> None:
-    """The twin steel columns with a light on top, like at the Bregenz mole heads."""
+    """Molo head light: two slender steel columns (~22 m) carrying an open dark square frame on top."""
     y0 = int(world.surface(x, z))
+    top = y0 + 22
     for k in (-1, 1):
         px, pz = x + axis[0] * k, z + axis[1] * k
         hh = int(world.h(px, pz))
-        for y in range(min(hh + 1, y0), y0 + 18):
+        for y in range(min(hh + 1, y0), top):
             world.edits.set(px, y, pz, "iron_block")
-    world.edits.set(x, y0 + 17, z, "iron_block")
-    world.edits.set(x, y0 + 16, z, "sea_lantern")
-    world.edits.set(x, y0 + 18, z, "lightning_rod")
+    # open box frame (3 x 3 x 3) of dark steel with the light inside
+    ox, oz = axis[1], axis[0]
+    for dy in range(0, 3):
+        for a in (-1, 0, 1):
+            for b in (-1, 0, 1):
+                edge = abs(a) == 1 and abs(b) == 1 or dy in (0, 2) and (abs(a) == 1 or abs(b) == 1)
+                if edge:
+                    world.edits.set(x + axis[0] * a + ox * b, top + dy, z + axis[1] * a + oz * b, "polished_blackstone")
+    world.edits.set(x, top + 1, z, "sea_lantern")
     _occupy(world, [(x, z), (x + axis[0], z + axis[1]), (x - axis[0], z - axis[1])])
+
+
+def mole_railing(world: World, tip, radius=90) -> int:
+    """Steel railing along the water edge of the mole head (iron bars with proper connections)."""
+    g = world.grid
+    tx, tz = tip
+    cells = set()
+    for z in range(tz - 5, tz + radius):
+        for x in range(tx - radius, tx + radius):
+            if not g.inside(x, z) or world.is_water(x, z):
+                continue
+            if math.hypot(x - tx, z - tz) > radius:
+                continue
+            iz, ix = z - g.z0, x - g.x0
+            if world.occupied[iz, ix]:
+                continue
+            if any(world.is_water(x + dx, z + dz) for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                cells.add((x, z))
+    for (x, z) in cells:
+        props = {d: str((x + dx, z + dz) in cells).lower() for d, (dx, dz) in
+                 {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}.items()}
+        y = int(world.surface(x, z))
+        world.edits.set(x, y, z, "iron_bars[" + ",".join(f"{k}={v}" for k, v in props.items()) + "]")
+        world.top[z - g.z0, x - g.x0] = B("smooth_stone")
+    _occupy(world, cells)
+    return len(cells)
 
 
 def build(world: World, log=print) -> dict:
@@ -243,7 +276,9 @@ def build(world: World, log=print) -> dict:
             break
     if land:
         z, x = land[0]
-        harbour_light(world, x, z + 1, (1, 0))
+        mole_railing(world, (x, z))
+        harbour_light(world, x, z + 2, (1, 0))
+        world.markers["Molo-Spitze (Hafenleuchte)"] = (int(x), int(world.surface(x, z + 4)), int(z + 4))
         lights += 1
     bw = [p for p in piers if p.geom_type == "Polygon" and p.area > 600 and marina_u is not None and p.intersects(marina_u)]
     for p in bw[:1]:

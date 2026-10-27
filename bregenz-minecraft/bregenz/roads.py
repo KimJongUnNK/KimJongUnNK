@@ -30,6 +30,8 @@ ROAD_STYLE = {
     "path": (2, "dirt_path", 0),
 }
 MARKED = {"motorway", "trunk", "primary", "secondary", "tertiary"}
+TUNNEL_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary"}
+OUTSIDE_PORTAL_Y = 410  # portals beyond the map edge (Pfändertunnel north portal, Hörbranz)
 
 
 def _ranges_without(row, flag, key="road_flags"):
@@ -87,6 +89,7 @@ def build(world: World, log=print) -> dict:
     bridges: list[tuple[str, object]] = []
     rails: list = []
     rail_bridges: list = []
+    tunnels: list = []
     for r in segs:
         line = r["geom"]
         if line.geom_type != "LineString":
@@ -108,6 +111,10 @@ def build(world: World, log=print) -> dict:
         if "is_indoor" in rflags or "is_under_construction" in rflags:
             continue
         keep = _ranges_without(r, "is_tunnel")
+        if cls in TUNNEL_CLASSES:
+            for a, b in data.has_flag(r, "is_tunnel"):
+                if (b - a) * line.length * 75000 > 40:  # ~metres; skip short underpasses
+                    tunnels.append((cls, line, a, b))
         for a, b in keep:
             sub = _split(line, [(a, b)])
             if not sub:
@@ -177,7 +184,18 @@ def build(world: World, log=print) -> dict:
         xs, zs, d = _sample(lb, 0.5)
         h0 = float(world.surface(int(np.floor(xs[0])), int(np.floor(zs[0]))) - 1)
         h1 = float(world.surface(int(np.floor(xs[-1])), int(np.floor(zs[-1]))) - 1)
-        deck = np.round(h0 + (h1 - h0) * d / max(d[-1], 1e-6)).astype(int)
+        deck = h0 + (h1 - h0) * d / max(d[-1], 1e-6)
+        # overpasses: keep 6 blocks of headroom above any road passing underneath
+        ix_ = np.clip(np.floor(xs).astype(int) - g.x0, 0, g.nx - 1)
+        iz_ = np.clip(np.floor(zs).astype(int) - g.z0, 0, g.nz - 1)
+        under = road[iz_, ix_] & (d > 4) & (d < d[-1] - 4)
+        if under.any():
+            need = world.H[iz_, ix_].astype(float) + 7
+            need[~under] = -1e9
+            k = int(np.argmax(need))
+            ramp = need[k] - 0.12 * np.abs(d - d[k])
+            deck = np.maximum(deck, ramp)
+        deck = np.round(deck).astype(int)
         # perpendicular offsets
         dx, dz = np.gradient(xs), np.gradient(zs)
         nrm = np.hypot(dx, dz) + 1e-9
@@ -210,11 +228,106 @@ def build(world: World, log=print) -> dict:
             world.road[iz, ix] = True
         nb += 1
 
+    # ---- tunnels (Citytunnel, Pfändertunnel, ...)
+    ntun = 0
+    for cls, line, a, b in tunnels:
+        if _tunnel(world, cls, line, a, b):
+            ntun += 1
+    log(f"roads: {ntun} tunnels carved")
+
     # ---- railway
     nrail = _railway(world, rails, rail_bridges, log)
     _platforms(world)
     world.roads_by_class = roads_by_class
-    return {"bridges": nb, "rail_cells": nrail}
+    return {"bridges": nb, "rail_cells": nrail, "tunnels": ntun}
+
+
+def _tunnel(world: World, cls: str, line, a: float, b: float) -> bool:
+    """Carve a road tunnel: floor interpolated between the portals, vaulted concrete tube with lights,
+    portal walls where the tube enters the hill and retaining walls in the open approach cut."""
+    g = world.grid
+    full = raster.to_block_geom(line)
+    L = full.length
+    if L <= 0:
+        return False
+    da, db = a * L, b * L
+
+    def road_y(dist):
+        p = full.interpolate(min(max(dist, 0), L))
+        x, z = int(np.floor(p.x)), int(np.floor(p.y))
+        if not g.inside(x, z):
+            return float(OUTSIDE_PORTAL_Y)
+        return float(world.H[z - g.z0, x - g.x0])
+
+    y0 = road_y(da - 12)
+    y1 = road_y(db + 12)
+    piece = ops.substring(full, da, db)
+    if piece.length < 2:
+        return False
+    xs, zs, d = _sample(piece, 0.5)
+    floor = np.round(y0 + (y1 - y0) * d / d[-1]).astype(int)
+    w = ROAD_STYLE[cls][0]
+    half = w / 2.0
+    dx, dz = np.gradient(xs), np.gradient(zs)
+    nrm = np.hypot(dx, dz) + 1e-9
+    px, pz = -dz / nrm, dx / nrm
+    ix = np.floor(xs).astype(int) - g.x0
+    iz = np.floor(zs).astype(int) - g.z0
+    inside = (ix >= 0) & (ix < g.nx) & (iz >= 0) & (iz < g.nz)
+    if not inside.any():
+        return False
+    ground = np.where(inside, world.H[np.clip(iz, 0, g.nz - 1), np.clip(ix, 0, g.nx - 1)], -9999)
+    covered = ground > floor + 8
+    E = world.edits
+    portals = set()
+    if covered.any():
+        idx = np.nonzero(covered & inside)[0]
+        if idx.size:
+            portals = {int(idx[0]), int(idx[-1])}
+    for i in range(len(xs)):
+        if not inside[i]:
+            continue
+        y = int(floor[i])
+        if covered[i]:
+            for o in np.arange(-half - 1.5, half + 1.51, 0.5):
+                x = int(np.floor(xs[i] + px[i] * o))
+                z = int(np.floor(zs[i] + pz[i] * o))
+                ao = abs(o)
+                ceil = y + 6 - int(round(2.0 * (min(ao, half) / half) ** 2))
+                if ao <= half:
+                    E.set(x, y, z, "white_concrete" if (abs(o) < 0.3 and int(d[i]) % 8 < 4) else "gray_concrete")
+                    for yy in range(y + 1, ceil + 1):
+                        E.set(x, yy, z, "air")
+                    E.set(x, ceil + 1, z, "light_gray_concrete")
+                    if abs(o) < 0.3 and int(d[i]) % 10 == 0:
+                        E.set(x, ceil, z, "light[level=15]")
+                        E.set(x, ceil + 1, z, "sea_lantern")
+                else:
+                    for yy in range(y, y + 7):
+                        E.set(x, yy, z, "smooth_stone")
+            if i in portals:  # portal wall across the opening
+                for o in np.arange(-half - 5, half + 5.01, 0.5):
+                    x = int(np.floor(xs[i] + px[i] * o))
+                    z = int(np.floor(zs[i] + pz[i] * o))
+                    top_ = max(int(world.h(x, z)), y + 9)
+                    for yy in range(y, min(top_, y + 12) + 1):
+                        opening = abs(o) <= half and yy <= y + 6 - int(round(2.0 * (abs(o) / half) ** 2))
+                        if not opening:
+                            E.set(x, yy, z, "light_gray_concrete" if abs(abs(o) - half) > 1 or yy > y + 6 else "white_concrete")
+        elif ground[i] > y:
+            # open approach cut with retaining walls
+            for o in np.arange(-half - 1.5, half + 1.51, 0.5):
+                x = int(np.floor(xs[i] + px[i] * o))
+                z = int(np.floor(zs[i] + pz[i] * o))
+                gtop = int(world.h(x, z))
+                if abs(o) <= half:
+                    E.set(x, y, z, "gray_concrete")
+                    for yy in range(y + 1, max(gtop, y) + 1):
+                        E.set(x, yy, z, "air")
+                else:
+                    for yy in range(y, gtop + 1):
+                        E.set(x, yy, z, "smooth_stone")
+    return True
 
 
 def _railway(world: World, rails, rail_bridges, log) -> int:
@@ -241,8 +354,18 @@ def _railway(world: World, rails, rail_bridges, log) -> int:
             continue
         a = float(world.surface(*path[0]) - 1)
         b = float(world.surface(*path[-1]) - 1)
+        n_ = len(path)
+        lin = np.array([a + (b - a) * i / max(n_ - 1, 1) for i in range(n_)])
+        # rail over road: at least 6 blocks of headroom (ramps at 12 %)
+        under = np.array([g.inside(x, z) and world.road[z - g.z0, x - g.x0] and not bed[z - g.z0, x - g.x0]
+                          and 4 < i < n_ - 4 for i, (x, z) in enumerate(path)])
+        if under.any():
+            need = np.array([float(world.h(x, z)) + 7 for x, z in path])
+            need[~under] = -1e9
+            k = int(np.argmax(need))
+            lin = np.maximum(lin, need[k] - 0.12 * np.abs(np.arange(n_) - k))
         for i, (x, z) in enumerate(path):
-            y = int(round(a + (b - a) * i / max(len(path) - 1, 1)))
+            y = int(round(lin[i]))
             if not g.inside(x, z):
                 continue
             for o in (-1, 0, 1):
