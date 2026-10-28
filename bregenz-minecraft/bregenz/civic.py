@@ -1181,33 +1181,54 @@ def _footbridge(world: World, base: int) -> None:
                 br = p
     if br is None:
         return
-    rect = br.minimum_rotated_rectangle
-    long_v, hs, hl = buildings._orientation(br)
-    c = np.asarray(rect.centroid.coords[0])
-    nrm = np.array([-long_v[1], long_v[0]])
-    # deck clears the catenary over the highest ground under the bridge
-    hmax = max(int(world.h(int(p[0]), int(p[1]))) for p in (c + long_v * t for t in np.arange(-hl, hl, 2.0)))
+    # the walkway follows the OSM footway segments of the bridge (it bends at the station building)
+    segs = []
+    for r in data.overture("segment"):
+        if r["subtype"] != "road" or r["class"] not in ("footway", "steps", "path") or r["geom"].geom_type != "LineString":
+            continue
+        for a, b in data.has_flag(r, "is_bridge"):
+            from .roads import _split
+            for piece in _split(r["geom"], [(a, b)]):
+                pb = raster.to_block_geom(piece)
+                if pb.intersects(br.buffer(2)):
+                    segs.append(pb)
+    merged = shapely.ops.linemerge(shapely.MultiLineString(segs)) if segs else None
+    paths = [q for q in (getattr(merged, "geoms", [merged]) if merged is not None else []) if q.length >= 20]
+    if not paths:
+        return
+    hmax = max(int(world.h(int(q.x), int(q.y))) for pth in paths
+               for q in (pth.interpolate(t) for t in np.arange(0, pth.length, 2.0)))
     deck = max(base + 9, hmax + 8)
     E = world.edits
-    for t in np.arange(-hl + 1, hl - 1, 0.5):
-        for o in np.arange(-2.0, 2.01, 0.5):
-            p = c + long_v * t + nrm * o
-            x, z = int(math.floor(p[0])), int(math.floor(p[1]))
-            if not g.inside(x, z):
-                continue
-            edge = abs(o) >= 1.9
-            E.set(x, deck, z, "smooth_stone" if not edge else "oxidized_cut_copper")
-            for y in (deck + 1, deck + 2, deck + 3):
-                E.set(x, y, z, ("light_blue_stained_glass" if y > deck + 1 else "oxidized_cut_copper") if edge else "air")
-            E.set(x, deck + 4, z, "oxidized_cut_copper_slab[type=bottom]" if abs(o) > 0.9 else "oxidized_cut_copper")
-            E.set(x, deck + 5, z, "oxidized_cut_copper_slab[type=bottom]" if abs(o) <= 0.9 else "air")
-        if int(t * 2) % 20 == 0:
-            for o in (-2.0, 2.0):
-                p = c + long_v * t + nrm * o
-                x, z = int(math.floor(p[0])), int(math.floor(p[1]))
-                if g.inside(x, z) and not world.occupied[z - g.z0, x - g.x0]:
-                    for y in range(int(world.h(x, z)) + 1, deck):
-                        E.set(x, y, z, "white_concrete")
+    from .roads import _sample
+    for pth in paths:
+        xs, zs, dd = _sample(pth, 0.5)
+        dx, dz = np.gradient(xs), np.gradient(zs)
+        nl = np.hypot(dx, dz) + 1e-9
+        px_, pz_ = -dz / nl, dx / nl
+        for i_ in range(len(xs)):
+            for o in np.arange(-2.0, 2.01, 0.5):
+                x, z = int(math.floor(xs[i_] + px_[i_] * o)), int(math.floor(zs[i_] + pz_[i_] * o))
+                if not g.inside(x, z):
+                    continue
+                edge = abs(o) >= 1.9
+                E.set(x, deck, z, "smooth_stone" if not edge else "oxidized_cut_copper")
+                for y in (deck + 1, deck + 2, deck + 3):
+                    E.set(x, y, z, ("light_blue_stained_glass" if y > deck + 1 else "oxidized_cut_copper") if edge else "air")
+                E.set(x, deck + 4, z, "oxidized_cut_copper_slab[type=bottom]" if abs(o) > 0.9 else "oxidized_cut_copper")
+                E.set(x, deck + 5, z, "oxidized_cut_copper_slab[type=bottom]" if abs(o) <= 0.9 else "air")
+            if int(dd[i_] * 2) % 24 == 0:
+                for o in (-2.0, 2.0):
+                    x, z = int(math.floor(xs[i_] + px_[i_] * o)), int(math.floor(zs[i_] + pz_[i_] * o))
+                    if g.inside(x, z) and not world.road[z - g.z0, x - g.x0]:
+                        for y in range(int(world.h(x, z)) + 1, deck):
+                            E.set(x, y, z, "white_concrete")
+    longest = max(paths, key=lambda q: q.length)
+    a0, a1 = np.asarray(longest.coords[0]), np.asarray(longest.coords[-1])
+    c = np.asarray(longest.interpolate(0.5, normalized=True).coords[0])
+    south_end, prev = (a1, np.asarray(longest.coords[-2])) if a1[1] > a0[1] else (a0, np.asarray(longest.coords[1]))
+    ux = (south_end - prev) / (np.linalg.norm(south_end - prev) + 1e-9)
+    nrm = np.array([-ux[1], ux[0]])
     # stair towers where OSM has small building parts along the bridge (platform stairs / lifts)
     for p in data.overture("building_part"):
         gp = _bg(p)
@@ -1231,8 +1252,7 @@ def _footbridge(world: World, base: int) -> None:
                 v.set(x + dx, y, z, "air")
         v.commit(E)
     # stairs down at the Seestadt end
-    end = c + long_v * hl * (1 if (c + long_v * hl)[1] > (c - long_v * hl)[1] else -1)
-    ux = long_v if (c + long_v * hl)[1] > (c - long_v * hl)[1] else -long_v
+    end = south_end
     for k in range(deck - int(world.h(int(end[0]), int(end[1])))):
         p = end + ux * k
         for o in (-1, 0, 1):

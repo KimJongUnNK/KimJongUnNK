@@ -33,7 +33,9 @@ def column(world: Path, x: int, z: int, cache: dict):
 
 def main(world: Path) -> int:
     rails = [raster.to_block_geom(r["geom"]) for r in data.overture("segment") if r["subtype"] == "rail"
-             and r["geom"].geom_type == "LineString"]
+             and r["geom"].geom_type == "LineString"
+             and not (set().union(*[v for v, _ in data.flags(r, "rail_flags")]) & {"is_abandoned", "is_disused"}
+                      if r.get("rail_flags") else set())]
     plain = []
     bridges = []
     for r in data.overture("segment"):
@@ -54,7 +56,7 @@ def main(world: Path) -> int:
         if g.length < 12:
             continue
         under_geoms = [q for q in rails + plain if q.crosses(g)]
-        pts = [g.interpolate(q) for q in [ug.intersection(g) for ug in under_geoms] if not q.is_empty]
+        pts = [q for q in [ug.intersection(g) for ug in under_geoms] if not q.is_empty]
         pts = [p if p.geom_type == "Point" else p.centroid for p in pts]
         mid = g.interpolate(0.5, normalized=True)
         pts.append(mid)
@@ -68,15 +70,21 @@ def main(world: Path) -> int:
             if not solid:
                 continue
             checked += 1
-            # deck = highest solid block; gap below it
-            deck = max(i for i in solid)
-            k = deck - 1
-            while k >= 0 and col[k] in ("smooth_stone", "light_gray_concrete", "smooth_stone_slab", "stone_bricks", "gravel"):
-                k -= 1
-            gap = 0
-            while k >= 0 and (col[k] in THIN or col[k] == "water"):
+            # clearance = the lowest air run above the ground (the space a vehicle drives through)
+            ground = None
+            for i in range(len(col) - 1):
+                if col[i] not in THIN and col[i] != "water" and col[i + 1] in THIN:
+                    ground = i
+                    break
+            if ground is None:
+                continue
+            gap, k = 0, ground + 1
+            while k < len(col) and col[k] in THIN:
                 gap += 1
-                k -= 1
+                k += 1
+            if k >= len(col):
+                gap = 99                    # nothing above: no deck here (ramp on the ground) -> not a crossing problem
+            deck = k
             crossing = p is not mid
             if crossing and gap < 4:
                 bad += 1

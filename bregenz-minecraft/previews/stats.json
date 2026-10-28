@@ -12,11 +12,11 @@
     -313
   ],
   "lake_cells": 11225366,
-  "bridges": 148,
+  "bridges": 127,
   "rail_cells": 24119,
   "tunnels": 6,
-  "buildings": 6859,
-  "replaced": 29,
+  "buildings": 6853,
+  "replaced": 35,
   "landmarks": [
     "kunsthaus",
     "vorarlberg_museum",
@@ -37,6 +37,9 @@
     "rathaus",
     "theater",
     "kornmarkt",
+    "stadion",
+    "seebad",
+    "wirtshaus_am_see",
     "casino",
     "kreisverkehr_schillerstrasse",
     "gebhardsberg_ruin",
@@ -48,31 +51,33 @@
     "harbour_detail"
   ],
   "landmarks_failed": [],
-  "street_lamps": 4408,
+  "street_lamps": 4409,
   "street_signs": 2948,
-  "place_signs": 143,
+  "place_signs": 142,
   "details": {
     "benches": 231,
-    "bins": 141,
+    "bins": 142,
     "bus_shelters": 85,
     "fountains": 19,
     "hedges": 278,
     "walls": 155,
     "fences": 126,
     "crossings": 372,
-    "bollards": 84,
+    "bollards": 83,
     "signals": 74,
     "pylons": 84,
     "masts": 54,
     "pitches": 84,
     "playgrounds": 37,
     "bike_racks": 29,
-    "stadiums": 1
+    "stadiums": 0,
+    "pavement": 743645,
+    "paved_yards": 490096
   },
-  "trees": 543534,
-  "plants": 5241617,
-  "edits": 137137289,
-  "block_states": 377,
+  "trees": 543532,
+  "plants": 5152378,
+  "edits": 136893550,
+  "block_states": 395,
   "spawn": [
     12,
     398,
@@ -80,10 +85,20 @@
   ],
   "world_mb": 728.6,
   "markers": {
-    "Seebühne": [
-      -644,
+    "Immo-Stadion (Casino-Stadion)": [
+      -996,
       399,
-      -118
+      73
+    ],
+    "Seebad Bregenz (Strandbad)": [
+      -934,
+      398,
+      -96
+    ],
+    "Seebühne": [
+      -642,
+      401,
+      -76
     ],
     "Seetribüne": [
       -637,
@@ -106,9 +121,14 @@
       270
     ],
     "Bahnhof Steg": [
-      -504,
+      -521,
       408,
-      209
+      141
+    ],
+    "Wirtshaus am See": [
+      -482,
+      399,
+      -35
     ],
     "Fischersteg": [
       -239,
