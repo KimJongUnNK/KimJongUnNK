@@ -174,11 +174,26 @@ def styles_for(world: World):
     kub_cafe = shapely.Point(78, -19)
     lb_wing = shapely.Point(-119, 1219)
     kmp = civic.kornmarkt_rows()
+    kaserne = [raster.to_block_geom(r["geom"]) for r in data.overture("land_use") if r["name"] == "Bilgeri-Kaserne"]
+    kaserne = kaserne[0] if kaserne else None
 
     def style(r):
         s = STYLES.get(r["name"])
         if s is not None:
             return dict(s)
+        if kaserne is not None and raster.to_block_geom(r["geom"]).intersects(kaserne):
+            p = raster.to_block_geom(r["geom"])
+            frac = p.intersection(kaserne).area / max(p.area, 1)
+            if frac > 0.5 and p.area > 1000:
+                # the long buildings on the Reichsstrasse: pale yellow, 4 storeys, white frames, orange tiled hipped roof
+                return dict(facade="smooth_sandstone", roof=("smooth_red_sandstone", "smooth_red_sandstone_slab[type=bottom]"),
+                            flat=False, gable=False, pitch=0.75, roof_cap=6, height=20, wall_height=15, floor_h=4,
+                            windows="normal", frames=True, plinth=True, shop=False, foundation="stone_bricks")
+            if frac > 0.5 and p.area > 500:
+                # barrack blocks behind: white, red tiled hipped roof, 3 storeys
+                return dict(facade="white_concrete", roof=("bricks", "brick_slab[type=bottom]"), flat=False, gable=False,
+                            pitch=0.75, roof_cap=5, height=15, wall_height=11, floor_h=4, windows="normal", frames=True,
+                            plinth=True, shop=False)
         if civic.is_bg_gallus(r) or civic.on_kornmarkt(r):
             return dict(skip=True)
         if r["name"] is None:
@@ -1620,6 +1635,7 @@ LABELS = [
     ("St. Wendelin (Fluh)", "building", "Pfarrkirche St. Wendelin", ["Fluh", "St. Wendelin"]),
     ("Sender Pfänder", "building", "Sender Pfänder", ["Sender", "Pfänder"]),
     ("Landhaus (Schild)", "building", "Landhaus", ["Landhaus", "Vorarlberger", "Landtag"]),
+    ("Bilgeri-Kaserne", "building", "Kommandogebäude Oberst Bilgeri", ["Bilgeri-", "Kaserne"]),
     ("Rathaus (Schild)", "building", "Rathaus", ["Rathaus", "Bregenz"]),
     ("Landesbibliothek", "building", "Ehemaliges St.-Gallus-Stift", ["Vorarlberger", "Landes-", "bibliothek"]),
     ("Nepomukkapelle (Schild)", "building", "Nepomukkapelle", ["Nepomuk-", "kapelle"]),

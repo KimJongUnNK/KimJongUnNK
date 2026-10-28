@@ -73,14 +73,14 @@
     "bike_racks": 29,
     "stadiums": 0,
     "pavement": 643100,
-    "paved_yards": 508009,
+    "paved_yards": 508008,
     "car_parks": 227,
     "road_half_steps": 652711
   },
   "trees": 543208,
   "plants": 5165783,
-  "edits": 137601213,
-  "block_states": 399,
+  "edits": 137585683,
+  "block_states": 404,
   "spawn": [
     12,
     398,
@@ -292,6 +292,11 @@
       380,
       398,
       -610
+    ],
+    "Bilgeri-Kaserne": [
+      425,
+      401,
+      -472
     ],
     "Pfänderbahn Talstation": [
       470,

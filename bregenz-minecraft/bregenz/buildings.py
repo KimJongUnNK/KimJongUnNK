@@ -29,7 +29,7 @@ ROOFS = [(("bricks", "brick_slab[type=bottom]"), 4), (("deepslate_tiles", "deeps
 ROOF_STAIRS = {"bricks": "brick_stairs", "deepslate_tiles": "deepslate_tile_stairs", "red_nether_bricks": "red_nether_brick_stairs",
                "spruce_planks": "spruce_stairs", "mud_bricks": "mud_brick_stairs", "granite": "granite_stairs",
                "dark_oak_planks": "dark_oak_stairs", "oxidized_cut_copper": "oxidized_cut_copper_stairs",
-               "oak_planks": "oak_stairs"}
+               "oak_planks": "oak_stairs", "smooth_red_sandstone": "smooth_red_sandstone_stairs"}
 FACADES_OLD_TOWN = [("white_terracotta", 4), ("yellow_terracotta", 3), ("smooth_sandstone", 3), ("pink_terracotta", 2),
                     ("light_blue_terracotta", 1), ("lime_terracotta", 1), ("orange_terracotta", 1), ("white_concrete", 2),
                     ("light_gray_terracotta", 1)]
