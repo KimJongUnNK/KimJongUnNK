@@ -47,6 +47,16 @@ def _ranges_without(row, flag, key="road_flags"):
     return [(a, b) for a, b in keep if b - a > 1e-6]
 
 
+def _level(row, a: float, b: float, default: int = 0) -> int:
+    """OSM layer of the part [a, b] of a segment (Overture level_rules; bridges default to 1)."""
+    mid = (a + b) / 2
+    for rule in row.get("level_rules") or []:
+        btw = rule.get("between")
+        if btw is None or btw[0] - 1e-9 <= mid <= btw[1] + 1e-9:
+            return int(rule["value"])
+    return default
+
+
 def _split(line, ranges):
     out = []
     for a, b in ranges:
@@ -86,10 +96,11 @@ def build(world: World, log=print) -> dict:
     g = world.grid
     segs = data.overture("segment")
     roads_by_class: dict[str, list] = {}
-    bridges: list[tuple[str, object]] = []
+    bridges: list[tuple[str, object, int]] = []
     rails: list = []
     rail_bridges: list = []
     tunnels: list = []
+    underpasses: list = []
     for r in segs:
         line = r["geom"]
         if line.geom_type != "LineString":
@@ -111,10 +122,11 @@ def build(world: World, log=print) -> dict:
         if "is_indoor" in rflags or "is_under_construction" in rflags:
             continue
         keep = _ranges_without(r, "is_tunnel")
-        if cls in TUNNEL_CLASSES:
-            for a, b in data.has_flag(r, "is_tunnel"):
-                if (b - a) * line.length * 75000 > 40:  # ~metres; skip short underpasses
-                    tunnels.append((cls, line, a, b))
+        for a, b in data.has_flag(r, "is_tunnel"):
+            if cls in TUNNEL_CLASSES and (b - a) * line.length * 75000 > 40:  # ~metres
+                tunnels.append((cls, line, a, b))
+            elif (b - a) * line.length * 75000 < 70:
+                underpasses.append((cls, line, a, b))
         for a, b in keep:
             sub = _split(line, [(a, b)])
             if not sub:
@@ -129,7 +141,13 @@ def build(world: World, log=print) -> dict:
                     if not piece:
                         continue
                     is_br = any(x <= u + 1e-9 and v <= y + 1e-9 for x, y in br)
-                    (bridges.append((cls, piece[0])) if is_br else roads_by_class.setdefault(cls, []).append(piece[0]))
+                    if is_br:
+                        pb_ = raster.to_block_geom(piece[0]).centroid
+                        if cls in ("footway", "steps", "path") and -545 < pb_.x < -465 and 115 < pb_.y < 320:
+                            continue          # station footbridge: built as one structure in civic.bahnhof
+                        bridges.append((cls, piece[0], _level(r, u, v, 1)))
+                    else:
+                        roads_by_class.setdefault(cls, []).append(piece[0])
             else:
                 roads_by_class.setdefault(cls, []).append(seg)
 
@@ -177,40 +195,74 @@ def build(world: World, log=print) -> dict:
     # ---- tunnels (Citytunnel, Pfändertunnel, ...): approaches are cut down to the portals first
     ntun = 0
     world.portals = []
+    world.bridge_mask = raster.lines([l for _, l, _ in bridges], g, 4).astype(bool) if bridges else np.zeros_like(road)
     for cls, line, a, b in tunnels:
         pr = ROAD_STYLE[cls][2]
         if _tunnel(world, cls, line, a, b, road & (allmask == pr + 1)):
             ntun += 1
-    log(f"roads: {ntun} tunnels carved")
 
     # rail corridor (needed for bridge clearance over the tracks + catenary)
     rail_ll = [shapely.transform(l, lambda c: np.column_stack(geo.to_lonlat(c[:, 0], c[:, 1]))) for l in rails + rail_bridges]
     railmask = raster.lines(rail_ll, g, 6).astype(bool) if rail_ll else np.zeros_like(road)
 
-    # ---- bridges: concrete decks between their ends, raised over roads (6 free) and tracks (8 free)
+    log(f"roads: {ntun} tunnels carved")
+    nunder = 0
+    crossing = list(rails) + [raster.to_block_geom(l) for c2 in ("motorway", "trunk", "primary", "secondary", "tertiary",
+                                                                 "unclassified", "residential") for l in roads_by_class.get(c2, [])]
+    tree = shapely.STRtree(crossing) if crossing else None
+    for cls, line, a, b in underpasses:
+        pr = ROAD_STYLE[cls][2]
+        if tree is not None and _underpass(world, cls, line, a, b, tree, crossing, road & (allmask == pr + 1)):
+            nunder += 1
+    log(f"roads: {nunder} underpasses carved")
+
+    # ---- bridges: concrete decks between their ends. Clearance: 5 free over roads, 8 over tracks, 4 over water,
+    # 5 over a lower bridge (OSM layer order). Ends that would hang in the air get an embankment ramp along the
+    # road; ends at a tunnel portal are pinned to the portal floor.
     nb = 0
     rail_cells: set = set()
     E = world.edits
-    for cls, line in bridges:
+    deckmap: dict[tuple[int, int], tuple[int, int]] = {}   # (x, z) -> (deck y, layer)
+    portals = [(px_, pz_, yp) for px_, pz_, yp, _ in world.portals]
+    for cls, line, layer in sorted(bridges, key=lambda t: t[2]):
         w = ROAD_STYLE[cls][0]
         lb = raster.to_block_geom(line)
         if lb.length < 2:
             continue
         xs, zs, d = _sample(lb, 0.5)
+        L = max(d[-1], 1e-6)
         h0 = float(world.surface(int(np.floor(xs[0])), int(np.floor(zs[0]))) - 1)
         h1 = float(world.surface(int(np.floor(xs[-1])), int(np.floor(zs[-1]))) - 1)
-        deck = h0 + (h1 - h0) * d / max(d[-1], 1e-6)
-        # overpasses: keep 6 blocks of headroom above any road passing underneath
+        # ends near a tunnel portal stay on the approach road (no ramp up, no embankment in front of the portal)
+        pins = {}
+        for end, (ex, ez) in ((0, (xs[0], zs[0])), (1, (xs[-1], zs[-1]))):
+            for px_, pz_, yp in portals:
+                dp = float(np.hypot(ex - px_, ez - pz_))
+                if dp < 40:
+                    pins[end] = (h0, h1)[end] if dp > 6 else float(yp)
+        deck = h0 + (h1 - h0) * d / L
         ix_ = np.clip(np.floor(xs).astype(int) - g.x0, 0, g.nx - 1)
         iz_ = np.clip(np.floor(zs).astype(int) - g.z0, 0, g.nz - 1)
-        on_rail = railmask[iz_, ix_] & (d > 3) & (d < d[-1] - 3)
-        under = (road[iz_, ix_] & (d > 4) & (d < d[-1] - 4)) | on_rail
-        if under.any():
-            need = world.H[iz_, ix_].astype(float) + np.where(on_rail, 10, 7)
-            need[~under] = -1e9
-            k = int(np.argmax(need))
-            ramp = need[k] - 0.12 * np.abs(d - d[k])
+        mid = (d > 3) & (d < L - 3)
+        on_rail = railmask[iz_, ix_] & mid
+        on_road = road[iz_, ix_] & (d > 4) & (d < L - 4)
+        wet = (world.wtop[iz_, ix_] > world.H[iz_, ix_]) & mid & (L >= 20)
+        lower = np.array([deckmap.get((int(np.floor(x)), int(np.floor(z))), (-10000, 99))[1] < layer
+                          for x, z in zip(xs, zs)]) & mid
+        lower_y = np.array([deckmap.get((int(np.floor(x)), int(np.floor(z))), (-10000, 99))[0] for x, z in zip(xs, zs)])
+        need = np.full(d.shape, -1e9)
+        Hu = world.H[iz_, ix_].astype(float)
+        need = np.where(on_road, np.maximum(need, Hu + 7), need)
+        need = np.where(on_rail, np.maximum(need, Hu + 10), need)
+        need = np.where(wet, np.maximum(need, world.wtop[iz_, ix_].astype(float) + 5), need)
+        need = np.where(lower, np.maximum(need, lower_y + 7.0), need)
+        if (need > -1e8).any():
+            # the deck may not drop below what any crossing needs, ramps at 12 % on either side
+            ramp = np.max(need[None, :] - 0.12 * np.abs(d[:, None] - d[None, :]), axis=1)
             deck = np.maximum(deck, ramp)
+        for end, dist in ((0, d), (1, L - d)):
+            if end in pins:
+                deck = np.minimum(deck, pins[end] + 0.12 * dist)
         deck = np.round(deck).astype(int)
         # perpendicular offsets
         dx, dz = np.gradient(xs), np.gradient(zs)
@@ -230,7 +282,10 @@ def build(world: World, log=print) -> dict:
             if not g.inside(x, z):
                 continue
             iz, ix = z - g.z0, x - g.x0
-            if world.H[iz, ix] >= y - 1 and world.wtop[iz, ix] <= world.H[iz, ix]:
+            prev = deckmap.get((x, z))
+            over_bridge = prev is not None and prev[1] < layer
+            deckmap[(x, z)] = (y, layer)
+            if world.H[iz, ix] >= y - 1 and world.wtop[iz, ix] <= world.H[iz, ix] and not over_bridge:
                 world.H[iz, ix] = y
                 world.top[iz, ix] = B(ROAD_STYLE[cls][1])
                 world.road[iz, ix] = True
@@ -244,6 +299,25 @@ def build(world: World, log=print) -> dict:
                 for yy in range(y + 1, y + 4):
                     E.set(x, yy, z, "air")
             world.road[iz, ix] = True
+        # ends higher than the road they connect to: embankment ramp along the road beyond the end
+        for end in (0, 1):
+            if end in pins:
+                continue
+            i = 0 if end == 0 else len(xs) - 1
+            j = min(len(xs) - 1, 8) if end == 0 else max(0, len(xs) - 9)
+            ex, ez = xs[i], zs[i]
+            u = np.array([ex - xs[j], ez - zs[j]])
+            if np.linalg.norm(u) < 1e-6:
+                continue
+            u /= np.linalg.norm(u)
+            gx_, gz_ = int(np.floor(ex)), int(np.floor(ez))
+            if not g.inside(gx_, gz_):
+                continue
+            top = deck[i]
+            if top - world.H[gz_ - g.z0, gx_ - g.x0] < 2:
+                continue
+            if all(np.hypot(ex - px_, ez - pz_) > 60 for px_, pz_, _ in portals):
+                _embankment(world, ex, ez, u, top, half)
         # piers every ~14 blocks where the deck is high and nothing runs underneath
         for i in range(0, len(xs), 28):
             x, z, y = int(np.floor(xs[i])), int(np.floor(zs[i])), int(deck[i])
@@ -272,8 +346,80 @@ def build(world: World, log=print) -> dict:
     return {"bridges": nb, "rail_cells": nrail, "tunnels": ntun}
 
 
+def _embankment(world: World, ex: float, ez: float, u, top: int, half: float) -> None:
+    """Earth ramp under the road beyond a bridge end that sits higher than the ground (12 %)."""
+    g = world.grid
+    n = np.array([-u[1], u[0]])
+    steps = int((top - 1) / 0.12) + 1
+    for k in range(0, steps * 2):
+        t = k * 0.5
+        y = top - 0.12 * t
+        c = np.array([ex, ez]) + u * t
+        done = True
+        for o in np.arange(-half - 2, half + 2.01, 0.5):
+            x, z = int(np.floor(c[0] + n[0] * o)), int(np.floor(c[1] + n[1] * o))
+            if not g.inside(x, z):
+                continue
+            iz, ix = z - g.z0, x - g.x0
+            target = y - max(0.0, abs(o) - half)          # side slopes 1:1
+            if world.H[iz, ix] < round(target) and world.wtop[iz, ix] <= world.H[iz, ix]:
+                world.H[iz, ix] = int(round(target))
+                done = False
+        if done and k > 4:
+            break
+
+
+def _underpass(world: World, cls: str, line, a: float, b: float, tree, crossing, classmask) -> bool:
+    """Short OSM tunnels below a railway or a road (underpasses): the road dips under the crossing in a
+    walled trough, the crossing stays on top."""
+    g = world.grid
+    full = raster.to_block_geom(line)
+    L = full.length
+    piece = ops.substring(full, a * L, b * L)
+    if piece.length < 3 or not g.inside(int(piece.centroid.x), int(piece.centroid.y)):
+        return False
+    over = [crossing[i] for i in tree.query(piece) if crossing[i].intersects(piece)]
+    if not over:
+        return False           # passages under buildings etc.: left as they are
+    xs, zs, d = _sample(piece, 0.5)
+    top = float(max(world.h(int(np.floor(x)), int(np.floor(z))) for x, z in zip(xs, zs)))
+    ends = min(world.h(int(np.floor(xs[0])), int(np.floor(zs[0]))), world.h(int(np.floor(xs[-1])), int(np.floor(zs[-1]))))
+    floor = int(min(top - 6, ends))
+    half = max(1.0, ROAD_STYLE[cls][0] / 2.0)
+    E = world.edits
+    dx, dz = np.gradient(xs), np.gradient(zs)
+    nrm = np.hypot(dx, dz) + 1e-9
+    px, pz = -dz / nrm, dx / nrm
+    for i in range(len(xs)):
+        for o in np.arange(-half - 1, half + 1.01, 0.5):
+            x, z = int(np.floor(xs[i] + px[i] * o)), int(np.floor(zs[i] + pz[i] * o))
+            if not g.inside(x, z):
+                continue
+            gtop = int(world.h(x, z))
+            if abs(o) <= half:
+                E.set(x, floor, z, "gray_concrete" if half > 1.5 else "smooth_stone")
+                for y in range(floor + 1, floor + 5):
+                    E.set(x, y, z, "air")
+                if gtop > floor + 5:
+                    E.set(x, floor + 5, z, "smooth_stone")
+                if abs(o) < 0.3 and i % 16 == 0:
+                    E.set(x, floor + 4, z, "light[level=15]")
+            else:
+                for y in range(floor, min(gtop, floor + 5) + 1):
+                    E.set(x, y, z, "smooth_stone")
+    # ramps down to the trough along the connecting road (same machinery as tunnel approaches)
+    for (ex, ez), (qx, qz) in (((xs[0], zs[0]), (xs[min(6, len(xs) - 1)], zs[min(6, len(zs) - 1)])),
+                               ((xs[-1], zs[-1]), (xs[max(0, len(xs) - 7)], zs[max(0, len(zs) - 7)]))):
+        u = np.array([ex - qx, ez - qz])
+        if np.linalg.norm(u) < 1e-6:
+            continue
+        u /= np.linalg.norm(u)
+        _approach_cut(world, ex, ez, floor, classmask, u, half, radius=60.0)
+    return True
+
+
 def _approach_cut(world: World, px: float, pz: float, yp: int, classmask, u, half: float,
-                  radius: float = 140.0) -> None:
+                  radius: float = 140.0, walls_on_roads: bool = False) -> None:
     """Lower the approach road towards a tunnel portal (smooth ramp) and line the cut with retaining walls.
     Only a cone in front of the portal (along the outward direction u) is touched, so roads crossing
     above the tunnel stay where they are."""
@@ -303,6 +449,8 @@ def _approach_cut(world: World, px: float, pz: float, yp: int, classmask, u, hal
     H[lower] = np.round(target[lower]).astype(np.int16)
     # retaining walls on the cut sides
     side = ndimage.binary_dilation(lower, iterations=2) & ~road
+    if not walls_on_roads:
+        side &= ~world.road[za:zb, xa:xb]
     neigh = ndimage.grey_erosion(np.where(lower, H, 32000), size=5)
     wall = side & (old > neigh + 1) & (neigh < 32000)
     wz, wx = np.nonzero(wall)
@@ -324,14 +472,20 @@ def _tunnel(world: World, cls: str, line, a: float, b: float, classmask) -> bool
     def portal_y(dist, outward):
         """Lowest road level within 40 m outside the portal (the approach is in a cut)."""
         ys = []
+        bm = getattr(world, "bridge_mask", None)
         for k in range(2, 42, 4):
             p = full.interpolate(min(max(dist + outward * k, 0), L))
             x, z = int(np.floor(p.x)), int(np.floor(p.y))
             if g.inside(x, z):
+                if bm is not None and bm[z - g.z0, x - g.x0]:
+                    break      # the approach continues on a bridge: never sample the valley under it
                 ys.append(float(world.H[z - g.z0, x - g.x0]))
-        if not ys:
-            return float(OUTSIDE_PORTAL_Y), None
         p = full.interpolate(min(max(dist, 0), L))
+        if not ys:
+            x, z = int(np.floor(p.x)), int(np.floor(p.y))
+            if not g.inside(x, z):
+                return float(OUTSIDE_PORTAL_Y), None
+            ys = [float(world.H[z - g.z0, x - g.x0])]
         return min(ys), (p.x, p.y)
 
     y0, p0 = portal_y(da, -1)
@@ -394,8 +548,10 @@ def _tunnel(world: World, cls: str, line, a: float, b: float, classmask) -> bool
                 for o in np.arange(-half - 5, half + 5.01, 0.5):
                     x = int(np.floor(xs[i] + px[i] * o))
                     z = int(np.floor(zs[i] + pz[i] * o))
-                    top_ = max(int(world.h(x, z)), y + 9)
-                    for yy in range(y + 1, min(top_, y + 12) + 1):
+                    top_ = min(int(world.h(x, z)), y + 12)
+                    if abs(o) <= half + 1.01:
+                        top_ = max(top_, y + 8)          # arch ring + cornice over the opening
+                    for yy in range(y + 1, top_ + 1):
                         opening = abs(o) <= half + 0.01 and yy <= y + 6 - int(round(2.0 * (min(abs(o), half) / half) ** 2))
                         if opening:
                             E.set(x, yy, z, "air")
@@ -525,11 +681,17 @@ def _railway(world: World, rails, rail_bridges, log) -> int:
         # rail over road: at least 6 blocks of headroom (ramps at 12 %)
         under = np.array([g.inside(x, z) and world.road[z - g.z0, x - g.x0] and not bed[z - g.z0, x - g.x0]
                           and 4 < i < n_ - 4 for i, (x, z) in enumerate(path)])
-        if under.any():
-            need = np.array([float(world.h(x, z)) + 7 for x, z in path])
-            need[~under] = -1e9
-            k = int(np.argmax(need))
-            lin = np.maximum(lin, need[k] - 0.12 * np.abs(np.arange(n_) - k))
+        wet = np.array([g.inside(x, z) and world.is_water(x, z) and 4 < i < n_ - 4 for i, (x, z) in enumerate(path)])
+        if n_ < 20:
+            wet[:] = False
+        if under.any() or wet.any():
+            need = np.full(n_, -1e9)
+            hh = np.array([float(world.h(x, z)) for x, z in path])
+            ww = np.array([float(world.wtop[min(max(z - g.z0, 0), g.nz - 1), min(max(x - g.x0, 0), g.nx - 1)]) for x, z in path])
+            need = np.where(under, hh + 7, need)
+            need = np.where(wet, np.maximum(need, ww + 5), need)
+            idx = np.arange(n_)
+            lin = np.maximum(lin, np.max(need[None, :] - 0.12 * np.abs(idx[:, None] - idx[None, :]), axis=1))
         for i, (x, z) in enumerate(path):
             y = int(round(lin[i]))
             if not g.inside(x, z):

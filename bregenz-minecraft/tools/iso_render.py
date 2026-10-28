@@ -43,6 +43,17 @@ def read_chunk(region_dir: Path, cx: int, cz: int) -> dict | None:
 
 def color(name: str) -> tuple[int, int, int] | None:
     base = name.split("[")[0].split(":")[-1]
+    if "weathered_cut_copper" in base or "weathered_copper" in base:
+        return (100, 150, 110)
+    for suf in ("_slab", "_stairs", "_wall"):
+        if base.endswith(suf):
+            stem = base[: -len(suf)]
+            for cand in (stem + "s", stem, stem + "_planks", stem + "_block"):
+                if cand in BASE_COLORS:
+                    return BASE_COLORS[cand]
+                for w, c in WORD_COLORS:
+                    if w in cand and w not in ("red", "white", "gray"):
+                        return c
     if base in TRANSPARENT:
         return None
     if base in BASE_COLORS:
@@ -120,9 +131,12 @@ def main(argv=None) -> int:
     ap.add_argument("box", nargs=6, type=int)
     ap.add_argument("out")
     ap.add_argument("--scale", type=int, default=3)
+    ap.add_argument("--rot", type=int, default=0, help="quarter turns of the camera (0 = from south-east, 2 = from north-west)")
     a = ap.parse_args(argv)
     x0, y0, z0, x1, y1, z1 = a.box
     ids, names = load_box(Path(a.world), min(x0, x1), min(y0, y1), min(z0, z1), max(x0, x1), max(y0, y1), max(z0, z1))
+    if a.rot % 4:
+        ids = np.ascontiguousarray(np.rot90(ids, a.rot % 4, axes=(1, 2)))
     render(ids, names, a.scale).save(a.out)
     print(f"{a.out}: {len(names)} block states in box")
     return 0

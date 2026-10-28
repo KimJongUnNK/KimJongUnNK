@@ -151,6 +151,8 @@ STYLES = {
     "Haus am Hafen": dict(skip=True),           # custom (Sutterlüty cubes, kreisverkehr_schillerstrasse)
     "Casino Bregenz": dict(skip=True),          # custom (two domes)
     "Landhaus": dict(skip=True),                # custom (civic.landhaus)
+    "Seebad Bregenz": dict(skip=True),          # custom (civic.seebad)
+    "Wirtshaus am See": dict(skip=True),        # custom (civic.wirtshaus_am_see)
     "Ehemaliges St.-Gallus-Stift": dict(skip=True),  # Landesbibliothek (civic.landesbibliothek)
     "Rathaus": dict(skip=True),                 # custom (civic.rathaus)
     "Nepomukkapelle": dict(skip=True),          # custom (civic.kornmarkt)
@@ -199,6 +201,8 @@ def styles_for(world: World):
                 # KUB Café: low glass pavilion in the KUB's frosted glass
                 return dict(facade="white_stained_glass", flat=True, height=5, wall_height=4, glass="glass_pane",
                             shop=True, green_roof=False, parapet=False, trim=False, plinth=False)
+        if civic.is_stadium_stand(r):
+            return dict(skip=True)     # the four stands: civic.stadion
         if r.get("class") in ("stadium", "grandstand") and stadiums:
             p = raster.to_block_geom(r["geom"])
             near = min(stadiums, key=lambda sg: sg.distance(p))
@@ -238,9 +242,9 @@ def exclusion_zones() -> shapely.Geometry:
 # ------------------------------------------------------------- the builds
 def build(world: World, log=print) -> dict:
     done, failed = [], []
-    for fn in (kunsthaus, vorarlberg_museum, martinsturm, seebuehne, civic.fischersteg, piers, mili_bridge, st_gallus_tower,
+    for fn in (kunsthaus, vorarlberg_museum, martinsturm, civic.seebuehne, civic.fischersteg, piers, mili_bridge, st_gallus_tower,
                unteres_tor_passage, herz_jesu, hauptpost, civic.bahnhof, civic.festspielhaus, civic.landhaus,
-               civic.landesbibliothek, civic.bg_gallus, civic.rathaus, civic.theater, civic.kornmarkt, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
+               civic.landesbibliothek, civic.bg_gallus, civic.rathaus, civic.theater, civic.kornmarkt, civic.stadion, civic.seebad, civic.wirtshaus_am_see, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
                harbour_detail):
         try:
             fn(world)

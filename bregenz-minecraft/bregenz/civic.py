@@ -7,6 +7,7 @@ and towers come out without gaps. Facades are pattern functions per part.
 """
 from __future__ import annotations
 
+import functools
 import math
 
 import numpy as np
@@ -268,8 +269,12 @@ def festspielhaus(world: World) -> None:
 
 
 def _plaza_symphoniker(world: World, base: int) -> None:
-    """Platz der Wiener Symphoniker: light gravel, the golden 'Ready Maid', water mirror, chairs, umbrellas, light masts."""
+    """Platz der Wiener Symphoniker: wide pale fine-gravel square; the oval shallow water mirror (OSM outline of the
+    artwork) with Gloria Friedmann's golden 'Ready Maid' (two polished legs merging into one hollow trunk, ~13 m)
+    standing in it; a loose ring of black steel chairs round the water; closed white umbrellas of the foyer café;
+    olive trees in planters at the entrance; the tall light mast at the western edge."""
     g = world.grid
+    E = world.edits
     r = _named("land_use", "Platz der Wiener Symphoniker")
     if r is not None:
         pl = _bg(r)
@@ -278,61 +283,112 @@ def _plaza_symphoniker(world: World, base: int) -> None:
         X, Z = fr.X[m], fr.Z[m]
         ok = g.inside(X, Z)
         X, Z = X[ok], Z[ok]
-        free = ~world.occupied[Z - g.z0, X - g.x0] & ~world.road[Z - g.z0, X - g.x0]
+        free = ~world.occupied[Z - g.z0, X - g.x0] & ~(world.wtop[Z - g.z0, X - g.x0] > world.H[Z - g.z0, X - g.x0])
         X, Z = X[free], Z[free]
-        world.top[Z - g.z0, X - g.x0] = np.where((X * 7 + Z * 3) % 5 == 0, B("smooth_sandstone"), B("sand"))
-        world.sub[Z - g.z0, X - g.x0] = B("sandstone")
+        noise = (X * 73856093 ^ Z * 19349663) % 7
+        world.top[Z - g.z0, X - g.x0] = np.where(noise == 0, B("light_gray_concrete_powder"),
+                                                 np.where(noise < 3, B("smooth_stone"), B("white_concrete_powder")))
+        world.sub[Z - g.z0, X - g.x0] = B("stone")
+        world.H[Z - g.z0, X - g.x0] = base
+        world.road[Z - g.z0, X - g.x0] = False
         world.occupied[Z - g.z0, X - g.x0] = True
     art = None
     for rr in data.overture("infrastructure"):
-        if rr["name"] == "Ready Maid":
+        if rr["name"] == "Ready Maid" and rr["geom"].geom_type == "Polygon":
             art = _bg(rr)
     if art is None:
         return
-    c = art.centroid
-    cx, cz = int(c.x), int(c.y)
-    y0 = int(world.h(cx, cz))
-    v = Vox(cx - 20, y0 - 2, cz - 20, 41, 22, 41)
-    # shallow round water mirror
-    for dx in range(-8, 9):
-        for dz in range(-8, 9):
-            d = math.hypot(dx, dz)
-            if d <= 7.2:
-                v.set(cx + dx, y0, cz + dz, "water")
-                v.set(cx + dx, y0 - 1, cz + dz, "smooth_stone")
-            elif d <= 8.2:
-                v.set(cx + dx, y0, cz + dz, "smooth_stone")
-    # Ready Maid: two bronze legs that lean together into one trunk (~13 m)
-    fx, fz = cx - 7, cz
-    for leg in (-2, 2):
-        v.line((fx, y0 + 1, fz + leg), (fx + 1, y0 + 7, fz), "gold_block")
-        v.set(fx, y0, fz + leg, "oxidized_copper")
-    v.line((fx + 1, y0 + 7, fz), (fx + 2, y0 + 13, fz - 1), "gold_block")
-    v.set(fx + 2, y0 + 14, fz - 1, "raw_gold_block")
-    # loose rings of black chairs facing the water
-    for k in range(18):
-        ang = k / 18 * 2 * math.pi
-        rad = 11 + (k % 3)
-        x, z = int(round(cx + rad * math.cos(ang))), int(round(cz + rad * math.sin(ang)))
-        dx, dz = cx - x, cz - z
-        facing = ("east" if dx > 0 else "west") if abs(dx) > abs(dz) else ("south" if dz > 0 else "north")
-        v.set(x, int(world.h(x, z)) + 1, z, f"polished_blackstone_stairs[facing={facing},half=bottom]")
-    v.commit(world.edits)
-    # closed white umbrellas of the café terrace and the tall light masts along the Seetribüne
-    for k in range(10):
-        x, z = -650 - (k % 2) * 3, -48 + k * 2
-        if not world.occupied[min(max(z - g.z0, 0), g.nz - 1), min(max(x - g.x0, 0), g.nx - 1)]:
-            h = int(world.h(x, z))
-            world.edits.set(x, h + 1, z, "spruce_fence")
-            world.edits.set(x, h + 2, z, "white_wool")
-            world.edits.set(x, h + 3, z, "white_wool")
-            world.edits.set(x, h + 4, z, "end_rod")
-    for k, (x, z) in enumerate(((-628, -40), (-612, -34), (-596, -28))):
-        h = int(world.h(x, z))
-        for y in range(h + 1, h + 17):
-            world.edits.set(x, y, z, "iron_bars")
-        world.edits.set(x, h + 17, z, "lantern")
-        world.edits.set(x, h + 16, z + 1, "sea_lantern")
+    # oval water mirror: the artwork outline, smoothed to an ellipse of the same extent
+    long_v, hs, hl = buildings._orientation(art)
+    c = np.asarray(art.centroid.coords[0])
+    n = np.array([-long_v[1], long_v[0]])
+    A, Bq = hl + 1.5, hs + 1.0
+    pool = set()
+    rim = set()
+    for dx in range(-int(A) - 3, int(A) + 4):
+        for dz in range(-int(A) - 3, int(A) + 4):
+            q = np.array([dx + 0.5, dz + 0.5]) + (c - np.floor(c))
+            u, w = q @ long_v, q @ n
+            e = (u / A) ** 2 + (w / Bq) ** 2
+            cell = (int(math.floor(c[0])) + dx, int(math.floor(c[1])) + dz)
+            if e <= 1.0:
+                pool.add(cell)
+            elif e <= 1.18:
+                rim.add(cell)
+    for (x, z) in pool:
+        if g.inside(x, z):
+            world.H[z - g.z0, x - g.x0] = base - 1
+            world.top[z - g.z0, x - g.x0] = B("gray_concrete")
+            world.wtop[z - g.z0, x - g.x0] = base
+            world.occupied[z - g.z0, x - g.x0] = True
+    for (x, z) in rim:
+        if g.inside(x, z):
+            world.top[z - g.z0, x - g.x0] = B("gravel")
+            world.H[z - g.z0, x - g.x0] = base
+            world.occupied[z - g.z0, x - g.x0] = True
+    # Ready Maid: stands off-centre in the water, legs ~4 m apart, fork at ~6 m, hollow trunk up to 13 m
+    fx, fz = c - long_v * A * 0.35
+    GOLD = "gold_block"
+    for side in (-1, 1):
+        f0 = np.array([fx, fz]) + n * side * 2.3
+        for k in range(0, 7):
+            t = k / 6
+            p = f0 * (1 - t) + np.array([fx + long_v[0] * 0.6, fz + long_v[1] * 0.6]) * t
+            for ox, oz in ((0, 0), (1, 0), (0, 1), (1, 1)) if k < 6 else ((0, 0), (1, 0)):
+                E.set(int(math.floor(p[0])) + ox, base + 1 + k, int(math.floor(p[1])) + oz, GOLD)
+    tx, tz = int(math.floor(fx + long_v[0] * 0.6)), int(math.floor(fz + long_v[1] * 0.6))
+    for k in range(7, 14):
+        lean = (k - 7) // 3
+        for ox, oz in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            E.set(tx + ox + lean, base + k, tz + oz, GOLD if k < 13 else "air")
+        if k == 13:
+            for ox, oz in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                E.set(tx + ox + lean, base + k, tz + oz, "yellow_stained_glass" if (ox + oz) % 2 else GOLD)
+    E.set(tx + 2, base + 13, tz + 1, "raw_gold_block")
+    # ring of black chairs round the water (some standing in it), facing the water
+    for k in range(44):
+        ang = 2 * math.pi * k / 44
+        rad_u, rad_w = A + 2.2 + (k % 3 == 0) * 0.8, Bq + 2.2 + (k % 3 == 0) * 0.8
+        if k % 11 == 5:
+            rad_u, rad_w = A - 2.5, Bq - 2.5                   # a few chairs in the water
+        p = c + long_v * rad_u * math.cos(ang) + n * rad_w * math.sin(ang)
+        x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+        d = c - p
+        facing = ("east" if d[0] > 0 else "west") if abs(d[0]) > abs(d[1]) else ("south" if d[1] > 0 else "north")
+        # stair "facing" is the side of the back rest: away from the water
+        back = {"east": "west", "west": "east", "north": "south", "south": "north"}[facing]
+        E.set(x, base + 1, z, f"polished_blackstone_stairs[facing={back},half=bottom]")
+        world.occupied[z - g.z0, x - g.x0] = True
+    # closed white umbrellas + tables of the foyer café along the glass facade (east side of the building)
+    for k in range(9):
+        x, z = -646 + (k % 3) * 4, -2 + (k // 3) * 6
+        if g.inside(x, z) and not world.is_water(x, z):
+            E.set(x, base + 1, z, "polished_andesite_slab[type=bottom]")
+            for y in range(base + 2, base + 4):
+                E.set(x, y, z, "iron_bars")
+            E.set(x, base + 4, z, "white_wool")
+            E.set(x, base + 5, z, "white_wool")
+            E.set(x, base + 6, z, "end_rod[facing=up]")
+            for ox, oz in ((2, 0), (0, 2)):
+                E.set(x + ox, base + 1, z + oz, "polished_blackstone_wall")
+                E.set(x + ox, base + 2, z + oz, "polished_blackstone_pressure_plate")
+    # olive trees in square planters at the entrance
+    for x, z in ((-627, 2), (-623, 8), (-620, 14)):
+        E.set(x, base + 1, z, "polished_andesite")
+        E.set(x, base + 2, z, "dark_oak_fence")
+        E.set(x, base + 3, z, "dark_oak_fence")
+        for ox in (-1, 0, 1):
+            for oz in (-1, 0, 1):
+                E.set(x + ox, base + 4, z + oz, "azalea_leaves[persistent=true]")
+        E.set(x, base + 5, z, "azalea_leaves[persistent=true]")
+    # tall light mast at the western edge of the square
+    if r is not None:
+        mx_, mz_ = int(pl.bounds[0]) + 6, int(pl.centroid.y)
+        for y in range(int(world.h(mx_, mz_)) + 1, base + 22):
+            E.set(mx_, y, mz_, "polished_blackstone_wall" if y < base + 3 else "iron_bars")
+        for ox in (-1, 0, 1):
+            E.set(mx_ + ox, base + 22, mz_, "sea_lantern")
+            E.set(mx_ + ox, base + 23, mz_, "smooth_stone_slab[type=bottom]")
 
 
 # ================================================================== Landhaus
@@ -1676,3 +1732,700 @@ def theater(world: World) -> None:
             E.set(x, top + k, z, "white_concrete")
         E.set(x, top + hh + 1, z, "oxidized_cut_copper_slab[type=bottom]")
     world.markers["Landestheater"] = (int(end[0] + out[0] * 3), base + 1, int(end[1] + out[1] * 3))
+
+
+# ============================================================ Immo-Stadion
+@functools.lru_cache(maxsize=1)
+def _stadium_field():
+    """OSM soccer pitch inside the ImmoAgentur-Stadion: centre, long axis, half length/width."""
+    st = _named("land_use", "ImmoAgentur-Stadion")
+    if st is None:
+        return None, None
+    sg = _bg(st)
+    for r in data.overture("land_use"):
+        if r["class"] != "pitch":
+            continue
+        tags = r.get("source_tags") or []
+        tags = dict(tags) if isinstance(tags, list) else tags
+        pg = _bg(r)
+        if "soccer" in (tags.get("sport") or "") and pg.within(sg.buffer(5)):
+            return sg, pg
+    return sg, None
+
+
+def is_stadium_stand(r) -> bool:
+    if r.get("class") not in ("stadium", "grandstand"):
+        return False
+    sg, _ = _stadium_field()
+    return sg is not None and _bg(r).distance(sg) < 15
+
+
+def stadion(world: World) -> None:
+    """ImmoAgentur-Stadion (Casino-Stadion): 8-lane red tartan track, pitch, covered Haupttribüne (west) with blue
+    seats under a dark timber roof, long low Osttribüne with blue seats (north part roofed), concrete standing
+    terraces in the Nord- and Südkurve, poplar row behind the Osttribüne, four floodlight masts."""
+    sg, pg = _stadium_field()
+    if sg is None or pg is None:
+        return
+    g = world.grid
+    long_v, hs, hl = buildings._orientation(pg)
+    if long_v[1] < 0:
+        long_v = -long_v                       # +a points south (towards the Südkurve)
+    c = np.asarray(pg.centroid.coords[0])
+    n = np.array([-long_v[1], long_v[0]])       # +t: west or east
+    east = 1.0 if n[0] > 0 else -1.0            # sign of t that points east
+    S, R, LANES = 42.0, 36.5, 10.0              # straight half length, inner radius, track width
+    fr = Frame(sg.buffer(60), 0)
+    P = np.stack([fr.X + 0.5 - c[0], fr.Z + 0.5 - c[1]], -1)
+    a, t = P @ long_v, P @ n
+    da = np.maximum(np.abs(a) - S, 0)
+    rr = np.hypot(da, t)                         # distance from the oval's spine
+    fl, fw = min(52.5, hl), min(34.0, hs)
+    inner = rr < R
+    track = (rr >= R) & (rr < R + LANES)
+    apron = (rr >= R + LANES) & (rr < R + LANES + 3)
+    allm = rr < R + LANES + 3
+    inside = (fr.X >= g.x0) & (fr.X < g.x1) & (fr.Z >= g.z0) & (fr.Z < g.z1)
+    sel = allm & inside
+    base = int(np.median(world.H[fr.Z[sel] - g.z0, fr.X[sel] - g.x0]))
+    iz, ix = fr.Z[sel] - g.z0, fr.X[sel] - g.x0
+    world.H[iz, ix] = base
+    world.wtop[iz, ix] = -32768
+    top = np.where(inner[sel], B("grass_block"), np.where(track[sel], B("red_terracotta"), B("smooth_stone")))
+    # lane lines (every 1.25 blocks would be noise: kerb, 4 lane lines, outer edge), start/finish line
+    lane = track & np.any([np.abs(rr - (R + k)) < 0.5 for k in (0.5, 2.5, 5.0, 7.5, 9.5)], axis=0)
+    finish = track & (np.abs(a - S) < 0.5) & (t * east < 0)
+    # D segments at both ends: red tartan with white markings, the rest of the infield grass
+    dseg = inner & (np.abs(a) > fl + 1.5)
+    field = inner & (np.abs(a) <= fl) & (np.abs(t) <= fw)
+    lines = field & ((np.abs(np.abs(a) - fl) < 0.55) | (np.abs(np.abs(t) - fw) < 0.55) | (np.abs(a) < 0.45)
+                     | (np.abs(np.hypot(a, t) - 9.15) < 0.5)
+                     | ((np.abs(a) > fl - 16.5) & (np.abs(np.abs(t) - 20.15) < 0.5))
+                     | ((np.abs(np.abs(a) - (fl - 16.5)) < 0.5) & (np.abs(t) < 20.15))
+                     | ((np.abs(a) > fl - 5.5) & (np.abs(np.abs(t) - 9.15) < 0.5))
+                     | ((np.abs(np.abs(a) - (fl - 5.5)) < 0.5) & (np.abs(t) < 9.15)))
+    stripes = field & ((np.floor((a + 100) / 6) % 2) == 0)
+    top = np.where(dseg[sel], B("red_terracotta"), top)
+    top = np.where(stripes[sel] & ~lines[sel], B("moss_block"), top)
+    top = np.where((lane | finish)[sel] | lines[sel], B("white_concrete"), top)
+    world.top[iz, ix] = top
+    world.sub[iz, ix] = B("dirt")
+    world.occupied[iz, ix] = True
+    E = world.edits
+    # goals
+    for side in (-1, 1):
+        gc = c + long_v * side * fl
+        for o in np.arange(-3.7, 3.71, 0.5):
+            p = gc + n * o
+            x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+            E.set(x, base + 3, z, "white_concrete")
+            if abs(o) > 3.5:
+                for k in (1, 2):
+                    E.set(x, base + k, z, "white_concrete")
+            q = gc + long_v * side * 1.5 + n * o
+            E.set(int(math.floor(q[0])), base + 1, int(math.floor(q[1])), "white_stained_glass_pane")
+        # high-jump landing mat in the D
+        m0 = c + long_v * side * (S + 18) + n * east * 6
+        for i in range(-2, 3):
+            for j in range(-1, 2):
+                p = m0 + long_v * j + n * i
+                E.set(int(math.floor(p[0])), base + 1, int(math.floor(p[1])), "white_wool")
+    # stands -------------------------------------------------------------------------------------
+    v = Vox(fr.x0, base - 2, fr.z0, fr.nx, 32, fr.nz)
+    out = R + LANES + 3                       # distance where the stands start
+
+    def stand(mask_fn, rows, seat, roof=None, roof_mask=None, standing=False, dense_rail=False):
+        for x, z in zip(*np.nonzero(mask_fn)):
+            X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+            k = rr[x, z] - out                      # depth into the stand
+            if k < 0 or k >= rows * 2:
+                continue
+            row = int(k // 2)
+            front = (k % 2) < 1
+            y = base + 1 + row
+            for yy in range(base + 1, y):
+                v.set(X, yy, Z, "light_gray_concrete")
+            v.set(X, y, Z, "smooth_stone" if (standing or front) else "light_gray_concrete")
+            if not standing and not front:
+                v.set(X, y + 1, Z, seat)
+            if standing and row % 2 == 1 and front and (X + Z) % 4:
+                v.set(X, y + 1, Z, "iron_bars")
+            if row == rows - 1 and not front:
+                v.set(X, y + 1, Z, "light_gray_concrete")
+                v.set(X, y + 2, Z, "iron_bars")
+        if roof is not None:
+            for x, z in zip(*np.nonzero(roof_mask)):
+                X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+                k = rr[x, z] - out
+                if -1.5 <= k < rows * 2 + 1:
+                    v.set(X, base + rows + 6, Z, roof)
+                    if (k >= rows * 2 - 0.6) and (X + Z) % 7 == 0:
+                        for yy in range(base + rows + 1, base + rows + 6):
+                            v.set(X, yy, Z, "iron_bars")
+                    if -1.5 <= k < -0.5 and (X * 3 + Z) % 11 == 0:
+                        for yy in range(base + 1, base + rows + 6):
+                            v.set(X, yy, Z, "iron_bars")
+    # the four stand footprints from OSM: Haupttribüne (west), Osttribüne, Nordkurve, Südkurve
+    stands = []
+    for b in data.overture("building"):
+        if b.get("class") not in ("stadium", "grandstand"):
+            continue
+        bg_ = _bg(b)
+        if bg_.distance(sg) > 15 or bg_.area < 300:
+            continue
+        m = fr.mask(bg_) & (rr >= out - 0.5)
+        if not m.any():
+            continue
+        ca = float(np.median(a[m]))
+        ct = float(np.median(t[m]))
+        if abs(ca) <= S:
+            kind = "haupt" if ct * east < 0 else "ost"
+        else:
+            kind = "nord" if ca < 0 else "sued"
+        stands.append((kind, m))
+    for kind, m in stands:
+        rows = max(3, int((rr[m].max() - out) // 2))
+        rows = min(rows, {"haupt": 12, "ost": 7, "nord": 8, "sued": 7}[kind])
+        m = m & (rr - out < rows * 2 + 1)
+        if kind == "haupt":
+            stand(m, rows, "blue_carpet", roof="dark_oak_slab[type=top]", roof_mask=m)
+        elif kind == "ost":
+            stand(m, rows, "blue_carpet", roof="white_concrete", roof_mask=m & (a < -10))
+        else:
+            stand(m, rows, None, standing=True)
+    # fence between track and stands
+    fence = set()
+    for x, z in zip(*np.nonzero((np.abs(rr - (R + LANES + 0.5)) < 0.5))):
+        fence.add((int(fr.X[x, z]), int(fr.Z[x, z])))
+    v.commit(world.edits)
+    for (x, z), st in _connected(fence, "iron_bars").items():
+        E.set(x, base + 1, z, st)
+    # poplar row behind the Osttribüne
+    for k in np.arange(-S - 10, S + 11, 7.0):
+        p = c + long_v * k + n * east * (out + 20)
+        x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+        if not g.inside(x, z):
+            continue
+        h = int(world.h(x, z))
+        for y in range(h + 1, h + 5):
+            E.set(x, y, z, "oak_log[axis=y]")
+        for y in range(h + 4, h + 19):
+            rad = 1 if y < h + 16 else 0
+            for dx in range(-rad, rad + 1):
+                for dz in range(-rad, rad + 1):
+                    if abs(dx) + abs(dz) <= rad:
+                        E.set(x + dx, y, z + dz, "oak_leaves[persistent=true]" if (dx or dz) else "oak_log[axis=y]")
+        E.set(x, h + 19, z, "oak_leaves[persistent=true]")
+        world.occupied[z - g.z0, x - g.x0] = True
+    # floodlight masts at the four corners
+    for sa in (-1, 1):
+        for st_ in (-1, 1):
+            p = c + long_v * sa * (S + 6) + n * st_ * (R + LANES + 22)
+            x, z = int(math.floor(p[0])), int(math.floor(p[1]))
+            if not g.inside(x, z):
+                continue
+            hb = int(world.h(x, z))
+            for y in range(hb + 1, base + 34):
+                E.set(x, y, z, "light_gray_concrete" if y < base + 6 else "iron_bars")
+            q = np.sign(c - p)
+            for i in (-1, 0, 1):
+                for dy in (0, 1, 2):
+                    ox_ = int(i * (1 if abs(n[0]) > abs(n[1]) else 0))
+                    oz_ = int(i * (0 if abs(n[0]) > abs(n[1]) else 1))
+                    E.set(x + oz_, base + 33 + dy, z + ox_, "sea_lantern" if dy < 2 else "iron_block")
+            world.occupied[z - g.z0, x - g.x0] = True
+    world.stadium = (c, long_v, fl, fw, base)
+    world.markers["Immo-Stadion (Casino-Stadion)"] = (int(c[0]), base + 1, int(c[1]))
+
+
+# ================================================================ Seebühne
+def _quad(v: Vox, O, U, V, fn, step=0.35):
+    """Rasterise the parallelogram O + u*U + v*V (u, v in [0, 1]); fn(u, v) -> block or None."""
+    O, U, V = (np.asarray(q, float) for q in (O, U, V))
+    nu = int(np.linalg.norm(U) / step) + 2
+    nv = int(np.linalg.norm(V) / step) + 2
+    for u in np.linspace(0, 1, nu):
+        for w in np.linspace(0, 1, nv):
+            blk = fn(u, w)
+            if blk is None:
+                continue
+            p = O + U * u + V * w
+            v.set(int(math.floor(p[0])), int(math.floor(p[1])), int(math.floor(p[2])), blk)
+
+
+def _mirror(u, w, cu=0.38, cw=0.52, aspect=1.4):
+    """Cracked mirror: radial cracks + rings around an impact point, facets in silver tones."""
+    du, dw = (u - cu) * aspect, (w - cw)
+    r = math.hypot(du, dw)
+    ang = (math.degrees(math.atan2(dw, du)) + 360) % 360
+    ring = [0.09, 0.2, 0.34, 0.52]
+    crack_ring = any(abs(r - q) < 0.012 for q in ring)
+    sector = 360 / 17
+    crack_ray = (ang % sector) < 1.1 * (0.12 / max(r, 0.12)) and r < 0.62
+    if crack_ring or crack_ray:
+        return "gray_concrete"
+    k = int(ang // sector) * 7 + sum(r > q for q in ring) * 3
+    return ("iron_block", "smooth_quartz", "white_concrete", "iron_block", "light_gray_concrete", "smooth_quartz")[k % 6]
+
+
+def seebuehne(world: World) -> None:
+    """Seebühne (Bregenzer Festspiele, current mirror set): a huge tilted, cracked mirror wall on a black steel
+    frame above the stage, a floor of mirror plates with green LED edges, broken plates in the water,
+    black light towers and loudspeakers, the dark backstage house at the lake end of the pier."""
+    r = None
+    for q in data.overture("infrastructure"):
+        if q["name"] == "Seebühne Bregenz" and q["geom"].geom_type == "Polygon":
+            r = q
+    if r is None:
+        return
+    pier = _bg(r)
+    minx, minz, maxx, maxz = pier.bounds
+    deck = WL + 3
+    v = Vox(int(minx) - 40, WL - 25, int(minz) - 30, int(maxx - minx) + 80, 80, int(maxz - minz) + 70)
+    fr = Frame(pier, 0)
+    m = fr.mask(pier)
+    front_z = maxz                       # the audience is south of the pier
+    # piles + black steel substructure + backstage house on the northern part
+    for x, z in zip(fr.X[m], fr.Z[m]):
+        x, z = int(x), int(z)
+        g0 = int(world.h(x, z))
+        if x % 5 == 0 and z % 5 == 0:
+            for y in range(g0 + 1, deck):
+                v.set(x, y, z, "polished_blackstone")
+        v.set(x, deck - 1, z, "polished_blackstone_slab[type=top]")
+        if z < minz + 36:                                   # Bühnenhaus (dark flat roof)
+            edge = not (m[x - fr.x0 - 1, z - fr.z0] and m[x - fr.x0 + 1, z - fr.z0]
+                        and m[x - fr.x0, z - fr.z0 - 1] and (z + 1 < minz + 36))
+            v.set(x, deck, z, "gray_concrete")
+            for y in range(deck + 1, deck + 12):
+                v.set(x, y, z, ("gray_concrete" if y % 4 else "black_concrete") if edge else "air")
+            v.set(x, deck + 12, z, "deepslate_tiles")
+            if edge and (x + z) % 6 == 0:
+                v.set(x, deck + 5, z, "black_stained_glass")
+        else:
+            v.set(x, deck, z, "black_concrete")
+    # main stage floor: mirror plates with crack lines and green LED edges
+    cx = (minx + maxx) / 2
+    sz0 = minz + 38
+    def floor_plate(x0_, z0_, x1_, z1_, y):
+        for x in range(int(x0_), int(x1_) + 1):
+            for z in range(int(z0_), int(z1_) + 1):
+                edge = x in (int(x0_), int(x1_)) or z in (int(z0_), int(z1_))
+                u, w = (x - x0_) / max(x1_ - x0_, 1), (z - z0_) / max(z1_ - z0_, 1)
+                v.set(x, y, z, "verdant_froglight" if edge else _mirror(u, w, 0.45, 0.4, 1.0))
+                for yy in range(int(world.h(x, z)) + 1, y):
+                    if edge and (x + z) % 4 == 0:
+                        v.set(x, yy, z, "polished_blackstone")
+    floor_plate(cx - 30, sz0, cx + 30, front_z + 2, deck + 1)
+    floor_plate(cx - 22, sz0 + 6, cx + 4, front_z - 8, deck + 2)        # raised inner level
+    # broken plates sliding into the water in front and at the sides
+    for (ox, oz, wx, wz, y) in ((-44, 6, 12, 7, WL + 1), (34, 4, 10, 6, WL + 1), (-12, 10, 16, 5, WL),
+                                (14, 9, 8, 5, WL + 1), (-36, -14, 9, 6, WL + 2), (38, -20, 8, 7, WL + 2)):
+        floor_plate(cx + ox, front_z + oz - wz, cx + ox + wx, front_z + oz, y)
+    # the mirror wall: a tilted parallelogram rising to the north-west, black frame behind it
+    base_y = deck + 3
+    O = np.array([cx - 36, base_y, sz0 + 20])
+    U = np.array([70.0, 9.0, -6.0])                     # along the stage, rising slightly to the east
+    V = np.array([-6.0, 40.0, -30.0])                   # up and back (tilt ~37 deg)
+    nrm = np.cross(U, V)
+    nrm = nrm / np.linalg.norm(nrm)
+    if nrm[2] < 0:
+        nrm = -nrm                                       # pointing to the audience (south)
+    _quad(v, O - nrm * 1.2, U, V, lambda u, w: "black_concrete" if (int(u * 14) % 3 == 0 or int(w * 10) % 3 == 0) else None)
+    _quad(v, O, U, V, lambda u, w: None if (u < 0.12 and w > 0.82) else _mirror(u, w))
+    # the lower edge breaks up into loose shards tilting forward
+    rng = np.random.default_rng(7)
+    for k in range(14):
+        u0 = rng.uniform(0.05, 0.9)
+        Os = O + U * u0 + nrm * rng.uniform(1, 6) + np.array([0, rng.uniform(-2, 3), 0])
+        Us = U / np.linalg.norm(U) * rng.uniform(5, 10)
+        Vs = np.array([rng.uniform(-2, 2), rng.uniform(1, 4), rng.uniform(3, 7)])
+        _quad(v, Os, Us, Vs, lambda u, w: "iron_block" if (u + w) % 0.5 > 0.06 else "verdant_froglight")
+    # steel props under the wall
+    for u in (0.1, 0.35, 0.6, 0.85):
+        for w in (0.3, 0.65):
+            p = O + U * u + V * w - nrm * 1.5
+            x, z = int(p[0]), int(p[2])
+            for y in range(deck + 1, int(p[1])):
+                v.set(x, y, z, "polished_blackstone_wall")
+    # stairs from the floor plates down to the water at both sides
+    for sx in (-1, 1):
+        x = int(cx + sx * 31)
+        for k in range(5):
+            for dz in range(3):
+                v.set(x + sx * k, deck - k, int(front_z) - 6 + dz, "polished_blackstone_stairs[facing=%s,half=bottom]" % ("west" if sx > 0 else "east"))
+    v.commit(world.edits)
+    E = world.edits
+    # black light towers (two each side) and loudspeaker boxes on the water
+    for sx in (-1, 1):
+        for dz in (-8, 14):
+            x, z = int(cx + sx * 46), int(front_z - dz)
+            for y in range(int(world.h(x, z)) + 1, WL + 30):
+                E.set(x, y, z, "polished_blackstone_wall")
+            for y in range(WL + 8, WL + 30, 5):
+                E.set(x + 1, y, z, "black_concrete")
+                E.set(x - 1, y, z, "sea_lantern")
+            E.set(x, WL + 30, z, "black_concrete")
+    for k, x in enumerate(np.linspace(cx - 40, cx + 40, 7)):
+        x, z = int(x), int(front_z + 12 + (k % 2) * 3)
+        for y in range(int(world.h(x, z)) + 1, WL + 1):
+            E.set(x, y, z, "polished_blackstone_wall")
+        E.fill(x - 1, WL + 1, z, x + 1, WL + 2, z, "black_concrete")
+    _occupy(world, Frame(pier, 0), m)
+    world.markers["Seebühne"] = (int(cx), deck + 2, int(front_z))
+    seetribuene(world, (cx, minz + 70))
+
+
+def seetribuene(world: World, focus) -> None:
+    """Seetribüne: ~7000 seats in a fan rising towards the Festspielhaus. Green seats in the centre blocks,
+    light blue in the front rows and the side wings, radial aisles (A-H), a cross aisle with entrances,
+    concrete risers, black steel railings at the top."""
+    r = _named("building", "Haupttribüne")
+    if r is None:
+        return
+    poly = _bg(r)
+    fr = Frame(poly, 1)
+    m = fr.mask(poly)
+    fx, fz = focus
+    d = np.hypot(fr.X + 0.5 - fx, fr.Z + 0.5 - fz)
+    ang = np.degrees(np.arctan2(fr.X + 0.5 - fx, fr.Z + 0.5 - fz))     # 0 = straight south
+    dmin = float(d[m].min())
+    base = int(np.median(fr.ground(world)[m]))
+    k = d - dmin
+    row = (k // 2).astype(int)
+    y = base + 1 + row
+    aisles = [-62, -46, -31, -15, 0, 15, 31, 46, 62]
+    in_aisle = np.zeros(m.shape, bool)
+    for a_ in aisles:
+        in_aisle |= np.abs(ang - a_) * np.pi / 180 * d < 1.1
+    cross = (row == 13)
+    top_row = int(row[m].max())
+    v = Vox(fr.x0, base - 6, fr.z0, fr.nx, top_row + 14, fr.nz)
+    gnd = fr.ground(world)
+    GREEN = "waxed_weathered_cut_copper_stairs"
+    BLUE = "waxed_oxidized_cut_copper_stairs"
+    for x, z in zip(*np.nonzero(m)):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        yy = int(y[x, z])
+        for q in range(min(int(gnd[x, z]), base) + 1, yy):
+            v.set(X, q, Z, "light_gray_concrete")
+        v.set(X, yy, Z, "smooth_stone")
+        for q in range(yy + 1, yy + 8):
+            v.set(X, q, Z, "air")
+        rr_ = row[x, z]
+        if in_aisle[x, z]:
+            v.set(X, yy, Z, "smooth_stone_slab[type=top]" if (k[x, z] % 2) < 1 else "smooth_stone")
+            continue
+        if cross[x, z] or rr_ == top_row:
+            continue
+        if (k[x, z] % 2) >= 1:          # back half of the row: the seat, facing the stage
+            vx, vz = X - fx, Z - fz
+            facing = ("east" if vx > 0 else "west") if abs(vx) > abs(vz) else ("south" if vz > 0 else "north")
+            wing = abs(ang[x, z]) > 40
+            seat = BLUE if (rr_ < 5 or wing) else GREEN
+            v.set(X, yy + 1, Z, f"{seat}[facing={facing},half=bottom]")
+    # entrances (vomitories) in the cross aisle, railings along the top and the cross aisle
+    rail = set()
+    for x, z in zip(*np.nonzero(m)):
+        if row[x, z] == top_row or (row[x, z] == 13 and (k[x, z] % 2) < 0.5 and not in_aisle[x, z]):
+            rail.add((int(fr.X[x, z]), int(fr.Z[x, z])))
+    v.commit(world.edits)
+    E = world.edits
+    ymap = {(int(fr.X[x, z]), int(fr.Z[x, z])): int(y[x, z]) for x, z in zip(*np.nonzero(m))}
+    for (x, z), st in _connected(rail, "iron_bars").items():
+        E.set(x, ymap[(x, z)] + 1, z, st)
+    for a_ in aisles[1:-1:2]:
+        rad = dmin + 13 * 2 + 1
+        X = int(fx + rad * math.sin(math.radians(a_)))
+        Z = int(fz + rad * math.cos(math.radians(a_)))
+        if (X, Z) in ymap:
+            yy = ymap[(X, Z)]
+            for q in range(yy - 3, yy + 1):
+                for dx in (-1, 0, 1):
+                    E.set(X + dx, q, Z + 1, "air" if q > yy - 3 else "black_concrete")
+    _occupy(world, fr, m)
+    world.markers["Seetribüne"] = (int(poly.centroid.x), base + 1, int(poly.centroid.y))
+
+
+# ================================================================== Seebad
+def seebad(world: World) -> None:
+    """Seebad Bregenz (new building): long flat two-storey building in light stone with a dark glass ground floor,
+    green roof with solar panels and a small roof pavilion; 50 m sports pool with lanes, leisure pool with the
+    dark glass water slide, diving pool with 1/3/5 m platforms, children's pools; light paving round the pools,
+    framed by clipped hedges; lawns, a raft in the lake."""
+    g = world.grid
+    E = world.edits
+    park = _named("land_use", "Seebad Bregenz")
+    pools = [(q["name"] or "", _bg(q)) for q in data.overture("water")
+             if q.get("class") == "swimming_pool" and park is not None and _bg(q).within(_bg(park).buffer(5))]
+    if not pools:
+        return
+    allp = shapely.union_all([p for _, p in pools])
+    deck_geom = allp.buffer(7, join_style="mitre").intersection(_bg(park))
+    fr = Frame(deck_geom.buffer(3), 0)
+    deck = fr.mask(deck_geom)
+    pm = fr.mask(allp)
+    gnd = fr.ground(world)
+    base = int(np.median(gnd[deck]))
+    # paving (light stone slabs in a grid)
+    for x, z in zip(*np.nonzero(deck & ~pm)):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        if not g.inside(X, Z):
+            continue
+        world.H[Z - g.z0, X - g.x0] = base
+        world.wtop[Z - g.z0, X - g.x0] = -32768
+        world.top[Z - g.z0, X - g.x0] = B("smooth_stone" if (X % 4 == 0 or Z % 4 == 0) else "polished_diorite")
+        world.occupied[Z - g.z0, X - g.x0] = True
+    # pools: white rim, light blue tiles, dark blue lane lines in the 50 m pool
+    for name, p in pools:
+        m = fr.mask(p)
+        rim = m & ~ndimage.binary_erosion(m)
+        depth = 4 if "Sprung" in name else (1 if "Kinder" in name else 2)
+        long_v, hs, hl = buildings._orientation(p)
+        c = np.asarray(p.centroid.coords[0])
+        nn = np.array([-long_v[1], long_v[0]])
+        for x, z in zip(*np.nonzero(m)):
+            X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+            if not g.inside(X, Z):
+                continue
+            iz, ix = Z - g.z0, X - g.x0
+            world.occupied[iz, ix] = True
+            if rim[x, z]:
+                world.H[iz, ix] = base
+                world.wtop[iz, ix] = -32768
+                world.top[iz, ix] = B("smooth_quartz")
+                continue
+            world.H[iz, ix] = base - depth
+            world.wtop[iz, ix] = base - 1 if depth > 1 else base
+            q = np.array([X + 0.5, Z + 0.5]) - c
+            lane = "50m" in name and abs(((q @ nn) + hs) % 2.5 - 1.25) < 0.4 and abs(q @ long_v) < hl - 2
+            world.top[iz, ix] = B("blue_terracotta" if lane else "light_blue_concrete")
+            world.sub[iz, ix] = B("white_concrete")
+        if "50m" in name:                                   # starting blocks at the end
+            for o in np.arange(-hs + 1.25, hs - 1, 2.5):
+                q = c + long_v * (hl - 0.5) + nn * o
+                E.set(int(math.floor(q[0])), base + 1, int(math.floor(q[1])), "smooth_quartz_slab[type=bottom]")
+        if "Sprung" in name:                                # diving platforms 1 / 3 / 5 m
+            q = c + long_v * (hl + 1.5)
+            x, z = int(math.floor(q[0])), int(math.floor(q[1]))
+            for y in range(base + 1, base + 6):
+                E.set(x, y, z, "light_gray_concrete")
+                E.set(x + 1, y, z, "light_gray_concrete")
+            for hgt, reach in ((1, 2), (3, 3), (5, 4)):
+                for k in range(1, reach + 1):
+                    p2 = q - long_v * k
+                    E.set(int(math.floor(p2[0])), base + hgt, int(math.floor(p2[1])), "smooth_quartz_slab[type=top]")
+            E.set(x - 1, base + 1, z, "ladder[facing=west]")
+        if "Unterhaltung" in name:                          # dark glass water slide sweeping into the pool
+            start = c + long_v * (hl + 6) + nn * (hs + 2)
+            end = c + long_v * (hl * 0.4)
+            for k in range(0, 40):
+                t = k / 39
+                p2 = start * (1 - t) + end * t + nn * math.sin(t * math.pi) * 5
+                y = base + 7 - int(round(t * 6))
+                X, Z = int(math.floor(p2[0])), int(math.floor(p2[1]))
+                for ox, oz in ((0, 0), (1, 0), (0, 1)):
+                    E.set(X + ox, y, Z + oz, "gray_stained_glass")
+                    E.set(X + ox, y + 2, Z + oz, "gray_stained_glass")
+                if k % 8 == 0 and y - 1 > base:
+                    for yy in range(base + 1, y):
+                        E.set(X, yy, Z, "polished_blackstone_wall")
+            E.fill(int(start[0]) - 1, base + 1, int(start[1]) - 1, int(start[0]) + 1, base + 6, int(start[1]) + 1, "light_gray_concrete")
+    # clipped hedges round the paved pool area (with gaps for the paths)
+    ring = deck & ~ndimage.binary_erosion(deck, iterations=1)
+    for x, z in zip(*np.nonzero(ring)):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        if (X * 3 + Z * 5) % 23 < 3 or world.is_water(X, Z):
+            continue
+        for y in (base + 1, base + 2):
+            E.set(X, y, Z, "dark_oak_leaves[persistent=true]")
+    # main building: light stone, dark glass ground floor, green roof with solar panels
+    b = _named("building", "Seebad Bregenz")
+    if b is not None:
+        info = buildings.building(world, dict(b, id="seebad"), _bg(b), dict(
+            facade="smooth_stone", flat=True, height=10, wall_height=9, floor_h=4, windows="normal",
+            glass="black_stained_glass_pane", shop=True, green_roof=False, parapet_block="smooth_stone_slab[type=bottom]",
+            frames=False, plinth=False, trim=False))
+        if info:
+            m, x0, z0 = info["mask"], info["x0"], info["z0"]
+            mT = m.T
+            core = ndimage.binary_erosion(mT, iterations=2)
+            top = info["wall_top"] + 1
+            for x, z in zip(*np.nonzero(core)):
+                X, Z = int(x + x0), int(z + z0)
+                solar = (X // 5 + Z // 9) % 3 == 0 and (X % 5) != 0
+                E.set(X, top, Z, "moss_block")
+                if solar:
+                    E.set(X, top + 1, Z, "daylight_detector[inverted=false,power=0]")
+                elif (X * 7 + Z * 3) % 13 == 0:
+                    E.set(X, top + 1, Z, "short_grass")
+            # roof pavilion
+            cx, cz = np.argwhere(core)[len(np.argwhere(core)) // 2]
+            X, Z = int(cx + x0), int(cz + z0)
+            E.fill(X - 4, top + 1, Z - 4, X + 4, top + 3, Z + 4, "smooth_stone")
+            E.fill(X - 3, top + 1, Z - 3, X + 3, top + 3, Z + 3, "air")
+            E.fill(X - 3, top + 4, Z - 3, X + 3, top + 4, Z + 3, "moss_block")
+            for k in (-2, 2):
+                E.set(X + k, top + 2, Z - 4, "black_stained_glass")
+                E.set(X + k, top + 2, Z + 4, "black_stained_glass")
+    # wooden raft in front of the beach
+    pier = None
+    for q in data.overture("infrastructure"):
+        if q.get("class") == "pier" and _bg(q).distance(_bg(park) if park is not None else shapely.Point(0, 0)) < 30 \
+                and 300 < _bg(q).area < 500:
+            pier = _bg(q)
+    if pier is not None:
+        rx, rz = int(pier.centroid.x) + 22, int(pier.centroid.y) - 18
+        if g.inside(rx, rz) and world.is_water(rx, rz):
+            E.fill(rx - 2, WL, rz - 2, rx + 2, WL, rz + 2, "spruce_planks")
+            E.set(rx + 2, WL + 1, rz, "ladder[facing=east]")
+    world.markers["Seebad Bregenz (Strandbad)"] = (int(allp.centroid.x), base + 1, int(allp.centroid.y))
+
+
+# ========================================================== Wirtshaus am See
+def wirtshaus_am_see(world: World) -> None:
+    """Wirtshaus am See (1910s): white ground floor with large windows under a white canvas awning, very steep red-brown
+    tiled roof with dormers, half-timbered gables (white infill, dense dark oak studs), a cross gable with a timber
+    balcony towards the lake, a slate roof turret with lantern, chimneys; beer garden with white umbrellas."""
+    b = _named("building", "Wirtshaus am See")
+    if b is None:
+        return
+    g = world.grid
+    poly = _bg(b)
+    long_v, hs, hl = buildings._orientation(poly)
+    c = np.asarray(poly.centroid.coords[0])
+    nn = np.array([-long_v[1], long_v[0]])
+    # the lake side: towards the nearest water
+    best = None
+    for sgn in (-1, 1):
+        for k in range(4, 80, 2):
+            q = c + nn * sgn * k
+            if world.is_water(int(q[0]), int(q[1])):
+                if best is None or k < best[0]:
+                    best = (k, sgn)
+                break
+    lake = best[1] if best else 1
+    fr = Frame(poly.buffer(10), 0)
+    P = np.stack([fr.X + 0.5 - c[0], fr.Z + 0.5 - c[1]], -1)
+    u, w = P @ long_v, P @ nn * lake            # w > 0: lake side
+    L, W = hl, hs
+    inside = (np.abs(u) <= L) & (np.abs(w) <= W)
+    base = int(np.median(fr.ground(world)[inside]))
+    eave = base + 5
+    pitch = 1.7
+    main = (W + 1.0 - np.abs(w)) * pitch                    # main ridge along u
+    ucg = L * 0.25                                           # cross gable centre (towards the east end)
+    wcg = 6.0
+    cross = np.where((w > 0) & (np.abs(u - ucg) <= wcg + 1), (wcg + 1.0 - np.abs(u - ucg)) * pitch, -1)
+    roof = np.maximum(main, cross)
+    under = (np.abs(u) <= L + 1) & (np.abs(w) <= W + 1)       # with 1 block of eaves
+    v = Vox(fr.x0, base - 3, fr.z0, fr.nx, 40, fr.nz)
+    gnd = fr.ground(world)
+    per = inside & ~((np.abs(u) <= L - 1) & (np.abs(w) <= W - 1))
+    RH = (eave + np.floor(roof)).astype(int)
+    for x, z in zip(*np.nonzero(under)):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        rh = int(eave + math.floor(roof[x, z]))
+        if inside[x, z]:
+            for y in range(int(gnd[x, z]) + 1, base):
+                v.set(X, y, Z, "stone_bricks")
+            v.set(X, base, Z, "spruce_planks")
+            for y in range(base + 1, rh):
+                v.set(X, y, Z, "air")
+        if per[x, z]:
+            along = int(round(u[x, z] if abs(abs(w[x, z]) - W) < 1 else w[x, z]))
+            for y in range(base + 1, eave):
+                rel = y - base
+                win = rel in (2, 3) and along % 3 != 0
+                v.set(X, y, Z, "glass_pane" if win else "white_concrete")
+            v.set(X, base + 1, Z, "light_gray_concrete")
+            # gable walls: half-timbering above the eaves
+            gable_end = abs(abs(u[x, z]) - L) < 0.8
+            cg_face = w[x, z] > W - 0.8 and abs(u[x, z] - ucg) <= wcg
+            if gable_end or cg_face:
+                top_h = rh - 1
+                k_al = int(round(w[x, z] if gable_end else u[x, z]))
+                for y in range(eave, top_h + 1):
+                    rel = y - eave
+                    stud = k_al % 2 == 0
+                    beam = rel in (0, 4, 9)
+                    win = (not stud) and rel in (2, 3, 6, 7) and abs(k_al) < 4
+                    v.set(X, y, Z, "stripped_dark_oak_log[axis=y]" if stud else ("dark_oak_planks" if beam else
+                                                                                  ("glass" if win else "white_concrete")))
+        # roof: tiles, filled down to the lowest neighbour so the steep slope has no gaps
+        nbs = [RH[x + dx, z + dz] for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1))
+               if 0 <= x + dx < RH.shape[0] and 0 <= z + dz < RH.shape[1] and under[x + dx, z + dz]]
+        lo = min(nbs + [rh])
+        for y in range(max(lo + 1, eave - 1), rh + 1):
+            v.set(X, y, Z, "bricks")
+        if roof[x, z] - math.floor(roof[x, z]) >= 0.5:
+            v.set(X, rh + 1, Z, "brick_slab[type=bottom]")
+    # dark barge boards along the gable edges
+    for x, z in zip(*np.nonzero(under & ((np.abs(np.abs(u) - (L + 1)) < 0.6) | ((w > W) & (np.abs(np.abs(u - ucg) - (wcg + 1)) < 0.6))))):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        v.set(X, int(eave + math.floor(roof[x, z])), Z, "dark_oak_planks")
+    # balcony on the cross gable (upper floor), timber railing
+    for x, z in zip(*np.nonzero((w > W) & (w <= W + 1.6) & (np.abs(u - ucg) <= wcg - 1))):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        v.set(X, eave + 3, Z, "dark_oak_slab[type=top]")
+        v.set(X, eave + 4, Z, "dark_oak_fence")
+    # dormers on the land side
+    for k in np.arange(-L + 3, L - 2, 5.0):
+        q = c + long_v * k - nn * lake * (W - 2.5)
+        X, Z = int(math.floor(q[0])), int(math.floor(q[1]))
+        y = eave + int((W + 1 - (W - 2.5)) * pitch)
+        v.set(X, y, Z, "glass")
+        v.set(X, y + 1, Z, "glass")
+        v.set(X, y + 2, Z, "brick_slab[type=bottom]")
+    # roof turret with lantern on the ridge (west part) and a chimney
+    tq = c - long_v * L * 0.45
+    tx, tz = int(math.floor(tq[0])), int(math.floor(tq[1]))
+    ridge = eave + int((W + 1) * pitch)
+    for y in range(ridge - 1, ridge + 4):
+        for ox in (-1, 0, 1):
+            for oz in (-1, 0, 1):
+                edge = abs(ox) == 1 or abs(oz) == 1
+                v.set(tx + ox, y, tz + oz, ("glass" if (ox == 0 or oz == 0) and y >= ridge + 1 else "dark_oak_planks") if edge else "air")
+    for k, rr_ in enumerate((2, 1, 1, 0)):
+        for ox in range(-rr_, rr_ + 1):
+            for oz in range(-rr_, rr_ + 1):
+                v.set(tx + ox, ridge + 4 + k, tz + oz, "deepslate_tiles")
+    v.set(tx, ridge + 8, tz, "lightning_rod")
+    cq = c + long_v * L * 0.55
+    for y in range(base + 1, ridge + 3):
+        v.set(int(math.floor(cq[0])), y, int(math.floor(cq[1])), "white_concrete" if y > ridge - 3 else "bricks")
+    v.set(int(math.floor(cq[0])), ridge + 3, int(math.floor(cq[1])), "stone_brick_slab[type=bottom]")
+    # door to the lake terrace
+    dq = c + nn * lake * W
+    for y in (base + 1, base + 2):
+        v.set(int(math.floor(dq[0])), y, int(math.floor(dq[1])), "air")
+    v.commit(world.edits)
+    E = world.edits
+    # white canvas awning round the lake and east sides, slim posts
+    for x, z in zip(*np.nonzero((~inside) & (np.abs(u) <= L + 4) & (np.abs(w) <= W + 4) & ((w > W) | (u > L)))):
+        X, Z = int(fr.X[x, z]), int(fr.Z[x, z])
+        dist = max(w[x, z] - W, u[x, z] - L)
+        E.set(X, base + 4 - (1 if dist > 2.5 else 0), Z, "white_wool" if dist <= 2.5 else "white_carpet")
+        if dist > 3.3 and (X + Z) % 4 == 0:
+            for y in range(base + 1, base + 3):
+                E.set(X, y, Z, "iron_bars")
+        world.occupied[Z - g.z0, X - g.x0] = True
+    # beer garden: tables with red cloths, chairs, white umbrellas, lanterns, hedge
+    for i in range(-2, 3):
+        for j in range(0, 3):
+            q = c + long_v * (i * 5) + nn * lake * (W + 7 + j * 5)
+            X, Z = int(math.floor(q[0])), int(math.floor(q[1]))
+            if not g.inside(X, Z) or world.is_water(X, Z):
+                continue
+            h = int(world.h(X, Z))
+            E.set(X, h + 1, Z, "oak_fence")
+            E.set(X, h + 2, Z, "red_carpet")
+            for dx_, dz_, f in ((1, 0, "west"), (-1, 0, "east"), (0, 1, "north"), (0, -1, "south")):
+                E.set(X + dx_, h + 1, Z + dz_, f"oak_stairs[facing={_opp(f)},half=bottom]")
+            for y in (h + 3, h + 4):
+                E.set(X, y, Z, "oak_fence")
+            for ox in (-1, 0, 1):
+                for oz in (-1, 0, 1):
+                    E.set(X + ox, h + 5, Z + oz, "white_wool" if ox == 0 or oz == 0 else "white_carpet")
+            world.occupied[Z - g.z0, X - g.x0] = True
+    world.markers["Wirtshaus am See"] = (int(c[0] + nn[0] * lake * (W + 3)), base + 1, int(c[1] + nn[1] * lake * (W + 3)))

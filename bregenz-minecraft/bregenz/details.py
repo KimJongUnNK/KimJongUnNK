@@ -171,7 +171,7 @@ def build(world: World, log=print) -> dict:
 
     stats["stadiums"] = 0
     for r in data.overture("land_use"):
-        if r["class"] == "stadium":
+        if r["class"] == "stadium" and r["name"] != "ImmoAgentur-Stadion":   # that one: civic.stadion
             if _stadium(world, raster.to_block_geom(r["geom"])):
                 stats["stadiums"] += 1
     for r in data.overture("land_use"):
@@ -183,8 +183,61 @@ def build(world: World, log=print) -> dict:
         elif r["class"] == "playground":
             if _playground(world, raster.to_block_geom(r["geom"])):
                 stats["playgrounds"] += 1
+    stats.update(streetscape(world))
     log("details: " + ", ".join(f"{v} {k}" for k, v in stats.items()))
     return {"details": stats}
+
+
+GREEN_USE = {"park", "grass", "garden", "cemetery", "recreation_ground", "playground", "pitch", "meadow", "village_green",
+             "forest", "orchard", "allotments", "farmland", "farmyard", "vineyard", "nature_reserve", "golf_course",
+             "water_park", "zoo", "camp_site", "stadium", "flowerbed", "dog_park", "grave_yard", "plant_nursery"}
+
+
+def streetscape(world: World) -> dict:
+    """Bregenz streets are lined with pavements, not lawn: a pavement band along every town street, kerbs in a darker
+    stone, and paved / gravel yards between the buildings of the dense quarters. Real green (parks, gardens, OSM grass,
+    forest, sports) stays green."""
+    g = world.grid
+    green = raster.polygons([r["geom"] for r in data.overture("land_use") if r.get("class") in GREEN_USE], g).astype(bool)
+    green |= getattr(world, "forest_mask", np.zeros_like(green))
+    wet = world.wtop > world.H
+    town_roads = [l for cls in ("primary", "secondary", "tertiary", "residential", "living_street", "unclassified",
+                                "pedestrian", "service")
+                  for l in world.roads_by_class.get(cls, [])]
+    town = raster.lines(town_roads, g, 2).astype(bool)
+    dist = ndimage.distance_transform_edt(~world.road)
+    near_town = ndimage.distance_transform_edt(~town) < 14
+    bld = raster.polygons([r["geom"] for r in data.overture("building")], g).astype(np.float32)
+    density = ndimage.uniform_filter(bld, 21)
+    free = ~world.occupied & ~world.road & ~wet & ~green
+    rural = world.H > 470
+    # pavement band (2-3 blocks) along town streets; kerb = the first block
+    pave = free & near_town & (dist <= 2.9) & ~rural
+    kerb = pave & (dist <= 1.0)
+    world.top[pave] = B("andesite")
+    world.top[kerb] = B("polished_andesite")
+    world.sub[pave] = B("stone")
+    # dense quarters: yards, forecourts and parking between the houses are paved
+    yard = free & ~pave & (density > 0.33) & (dist <= 25) & ~rural
+    zz, xx = np.nonzero(yard)
+    k = (xx * 7 + zz * 13) % 10
+    world.top[zz, xx] = np.where(k < 6, B("gray_concrete"), np.where(k < 8, B("andesite"), B("gravel")))
+    world.sub[yard] = B("stone")
+    # the old town is all paved (setts)
+    from .buildings import OLD_TOWN_ZONES
+    X = np.arange(g.nx)[None, :] + g.x0
+    Z = np.arange(g.nz)[:, None] + g.z0
+    old = np.zeros_like(yard)
+    for (cx, cz), rad in OLD_TOWN_ZONES:
+        x0_, x1_ = max(int(cx - rad) - g.x0, 0), min(int(cx + rad) - g.x0, g.nx)
+        z0_, z1_ = max(int(cz - rad) - g.z0, 0), min(int(cz + rad) - g.z0, g.nz)
+        if x0_ < x1_ and z0_ < z1_:
+            sub = (X[:, x0_:x1_] - cx) ** 2 + (Z[z0_:z1_, :] - cz) ** 2 < rad * rad
+            old[z0_:z1_, x0_:x1_] |= sub
+    sett = free & old & ~pave
+    zz, xx = np.nonzero(sett)
+    world.top[zz, xx] = np.where((xx + zz) % 3 == 0, B("stone_bricks"), B("andesite"))
+    return {"pavement": int(pave.sum()), "paved_yards": int(yard.sum() + sett.sum())}
 
 
 def _poly_cells(gb) -> set:
