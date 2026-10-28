@@ -1,0 +1,11 @@
+﻿Zone,Distanz_X_Blöcke,Höhe_Y_Blöcke,Steigung_Verhältnis
+1. Bodenseeufer,0,396,0% (Flach)
+1. Flachwasser,500,396,0% (Flach)
+2. Stadtzentrum (Beginn),501,397,Minimal
+2. Stadtzentrum (Ende),1000,400,< 1%
+3. Oberstadt (Beginn),1001,401,Beginn Anstieg
+3. Oberstadt (Gipfel),1200,425,15% - 20%
+4. Pfänderhang (Fuß),1201,426,Steil
+4. Pfänderhang (Mitte),2000,750,35% - 45% (1:2)
+5. Bergzone (Fluh Plateau),2700,1000,Sanfter
+5. Pfänder Gipfel,3000,1064,Plateau
