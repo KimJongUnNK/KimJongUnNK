@@ -223,6 +223,37 @@ def streetscape(world: World) -> dict:
     k = (xx * 7 + zz * 13) % 10
     world.top[zz, xx] = np.where(k < 6, B("gray_concrete"), np.where(k < 8, B("andesite"), B("gravel")))
     world.sub[yard] = B("stone")
+    # car parks: asphalt with white bay lines (the aisles are not drawn as separate roads)
+    n_park = 0
+    for r in data.overture("infrastructure"):
+        if r.get("class") != "parking" or r["geom"].geom_type not in ("Polygon", "MultiPolygon"):
+            continue
+        pg = raster.to_block_geom(r["geom"])
+        if pg.area < 150:
+            continue
+        m, x0, z0 = raster.polygon_cells(pg)
+        zz, xx = np.nonzero(m)
+        X, Z = xx + x0, zz + z0
+        ok = g.inside(X, Z)
+        X, Z = X[ok], Z[ok]
+        sel = ~world.occupied[Z - g.z0, X - g.x0] & ~(world.wtop[Z - g.z0, X - g.x0] > world.H[Z - g.z0, X - g.x0])
+        X, Z = X[sel], Z[sel]
+        if X.size == 0:
+            continue
+        long_v, hs_, hl_ = _axes(pg)
+        c = np.asarray(pg.centroid.coords[0])
+        P = np.column_stack([X + 0.5, Z + 0.5]) - c
+        a = P @ long_v
+        t = P @ np.array([-long_v[1], long_v[0]])
+        band = (np.floor((t + hs_) / 6.5)).astype(int)            # rows of bays 5 m deep + aisles
+        aisle = (band % 2 == 1)
+        line = ~aisle & (np.abs(((a + 1000) % 2.5) - 1.25) > 1.0)
+        top = np.where(line, B("white_concrete"), B("gray_concrete"))
+        world.top[Z - g.z0, X - g.x0] = top
+        world.sub[Z - g.z0, X - g.x0] = B("stone")
+        world.road[Z - g.z0, X - g.x0] = True
+        n_park += 1
+
     # the old town is all paved (setts)
     from .buildings import OLD_TOWN_ZONES
     X = np.arange(g.nx)[None, :] + g.x0
@@ -237,7 +268,35 @@ def streetscape(world: World) -> dict:
     sett = free & old & ~pave
     zz, xx = np.nonzero(sett)
     world.top[zz, xx] = np.where((xx + zz) % 3 == 0, B("stone_bricks"), B("andesite"))
-    return {"pavement": int(pave.sum()), "paved_yards": int(yard.sum() + sett.sum())}
+    n_slab = _road_slabs(world)
+    return {"pavement": int(pave.sum()), "paved_yards": int(yard.sum() + sett.sum()), "car_parks": n_park,
+            "road_half_steps": n_slab}
+
+
+SLAB_FOR = {"gray_concrete": "polished_deepslate_slab", "white_concrete": "polished_deepslate_slab",
+            "andesite": "andesite_slab", "polished_andesite": "polished_andesite_slab", "stone_bricks": "stone_brick_slab",
+            "smooth_stone": "smooth_stone_slab", "stone": "stone_slab"}
+
+
+def _road_slabs(world: World) -> int:
+    """Half steps where a street or pavement climbs by one block, so the surface reads (and drives) like a ramp."""
+    g = world.grid
+    H = world.H.astype(np.int32)
+    names = {B(k): v for k, v in SLAB_FOR.items()}
+    surf = np.isin(world.top, np.array(list(names), dtype=world.top.dtype))
+    ok = surf & ~(world.wtop > world.H) & (world.road | surf)
+    up = np.zeros(H.shape, bool)
+    for dz, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nb = np.roll(np.roll(H, -dz, 0), -dx, 1)
+        nok = np.roll(np.roll(ok, -dz, 0), -dx, 1)
+        up |= nok & (nb == H + 1)
+    sel = ok & up & ~world.occupied
+    sel[0, :] = sel[-1, :] = sel[:, 0] = sel[:, -1] = False
+    zz, xx = np.nonzero(sel)
+    tops = world.top[zz, xx]
+    ids = np.array([B(names[int(t)] + "[type=bottom]") for t in tops], dtype=np.uint16) if len(tops) else np.zeros(0, np.uint16)
+    world.edits.put(xx + g.x0, H[zz, xx] + 1, zz + g.z0, ids)
+    return int(len(zz))
 
 
 def _poly_cells(gb) -> set:

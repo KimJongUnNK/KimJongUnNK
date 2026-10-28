@@ -2163,8 +2163,95 @@ def seetribuene(world: World, focus) -> None:
             for q in range(yy - 3, yy + 1):
                 for dx in (-1, 0, 1):
                     E.set(X + dx, q, Z + 1, "air" if q > yy - 3 else "black_concrete")
+    world.tribune_geom = (fr, m, y, base, poly, (fx, fz), dmin)   # the entrance is cut after the Festspielhaus
     _occupy(world, fr, m)
     world.markers["Seetribüne"] = (int(poly.centroid.x), base + 1, int(poly.centroid.y))
+
+
+def tribune_entrance(world: World) -> None:
+    if getattr(world, "tribune_geom", None) is not None:
+        _tribune_passage(world, *world.tribune_geom)
+
+
+def _tribune_passage(world: World, fr: Frame, m, y, base: int, poly, focus, dmin: float) -> None:
+    """The entrance from the Platz der Wiener Symphoniker: a 5 m wide passage at ground level under the raised
+    rows, from the plaza side of the tribune straight down to the front walkway at the stage; where the rows get
+    low it opens into a cut through the seats with railings on both sides."""
+    art = None
+    for q in data.overture("infrastructure"):
+        if q["name"] == "Ready Maid" and q["geom"].geom_type == "Polygon":
+            art = _bg(q)
+    if art is None:
+        return
+    entry = np.asarray(shapely.ops.nearest_points(poly.exterior, art.centroid)[0].coords[0])
+    fx, fz = focus
+    ang = math.radians(20)
+    exit_ = np.array([fx + (dmin - 1.5) * math.sin(ang), fz + (dmin - 1.5) * math.cos(ang)])
+    out_ = exit_ + (exit_ - entry) / np.linalg.norm(exit_ - entry) * 4      # continue onto the front walkway
+    entry_ = entry - (exit_ - entry) / np.linalg.norm(exit_ - entry) * 3    # start on the plaza
+    path = shapely.LineString([tuple(entry_), tuple(out_)])
+    E = world.edits
+    g = world.grid
+    L = path.length
+    u = (out_ - entry_) / L
+    n = np.array([-u[1], u[0]])
+    ymap = {(int(fr.X[i, j]), int(fr.Z[i, j])): int(y[i, j]) for i, j in zip(*np.nonzero(m))}
+    rail = set()
+    hp = int(world.h(int(math.floor(entry_[0])), int(math.floor(entry_[1]))))   # plaza level
+    ramp_len = max(abs(hp - base) * 3.0, 1.0)                                  # 1 block down every 3 m
+
+    def floor_at(t):
+        return int(round(hp + (base - hp) * min(max((t - 2.0) / ramp_len, 0.0), 1.0)))
+
+    back = "east" if -u[0] > abs(u[1]) else "west" if u[0] > abs(u[1]) else ("south" if -u[1] > 0 else "north")
+    for t in np.arange(0, L, 0.5):
+        c = entry_ + u * t
+        fl = floor_at(t)
+        step = floor_at(t + 0.5) < fl
+        for o in np.arange(-3.5, 3.51, 0.5):
+            x, z = int(math.floor(c[0] + n[0] * o)), int(math.floor(c[1] + n[1] * o))
+            if not g.inside(x, z):
+                continue
+            yy = ymap.get((x, z))
+            if abs(o) <= 2.5:
+                E.set(x, fl, z, ("smooth_stone" if abs(o) < 2.4 else "polished_andesite") if not step
+                      else f"smooth_stone_stairs[facing={back},half=bottom]")
+                for q in range(min(fl, base) - 1, fl):
+                    E.set(x, q, z, "stone")
+                top = yy if yy is not None else fl + 6
+                if yy is None or yy - fl >= 6:           # covered passage (under the rows / the building corner)
+                    for q in range(fl + 1, fl + 5):
+                        E.set(x, q, z, "air")
+                    if yy is not None:
+                        E.set(x, fl + 5, z, "light_gray_concrete")
+                        if abs(o) < 0.3 and int(t * 2) % 12 == 0:
+                            E.set(x, fl + 5, z, "sea_lantern")
+                else:                                    # open cut through the low front rows
+                    for q in range(fl + 1, top + 3):
+                        E.set(x, q, z, "air")
+            else:
+                if yy is None:
+                    continue
+                if yy - fl >= 6:
+                    for q in range(fl + 1, fl + 5):
+                        E.set(x, q, z, "light_gray_concrete")     # passage walls
+                else:
+                    for q in range(fl + 1, yy + 1):
+                        E.set(x, q, z, "light_gray_concrete")     # side walls of the cut
+                    rail.add((x, z))
+    for (x, z), st in _connected(rail, "iron_bars").items():
+        E.set(x, ymap[(x, z)] + 1, z, st)
+    # entrance portal on the plaza side: dark frame with the "EINGANG" lettering
+    px_, pz_ = int(math.floor(entry[0])), int(math.floor(entry[1]))
+    fe = floor_at(3.0)
+    for o in (-3, 3):
+        x, z = int(math.floor(entry[0] + n[0] * o)), int(math.floor(entry[1] + n[1] * o))
+        for q in range(fe + 1, fe + 6):
+            E.set(x, q, z, "black_concrete")
+    for o in np.arange(-3, 3.01, 0.5):
+        x, z = int(math.floor(entry[0] + n[0] * o)), int(math.floor(entry[1] + n[1] * o))
+        E.set(x, fe + 5, z, "black_concrete")
+    world.markers["Seetribüne Eingang (Platz)"] = (px_, hp + 1, pz_)
 
 
 # ================================================================== Seebad

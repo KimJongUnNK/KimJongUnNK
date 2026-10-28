@@ -243,7 +243,7 @@ def exclusion_zones() -> shapely.Geometry:
 def build(world: World, log=print) -> dict:
     done, failed = [], []
     for fn in (kunsthaus, vorarlberg_museum, martinsturm, civic.seebuehne, civic.fischersteg, piers, mili_bridge, st_gallus_tower,
-               unteres_tor_passage, herz_jesu, hauptpost, civic.bahnhof, civic.festspielhaus, civic.landhaus,
+               unteres_tor_passage, herz_jesu, hauptpost, civic.bahnhof, civic.festspielhaus, civic.tribune_entrance, civic.landhaus,
                civic.landesbibliothek, civic.bg_gallus, civic.rathaus, civic.theater, civic.kornmarkt, civic.stadion, civic.seebad, civic.wirtshaus_am_see, casino, kreisverkehr_schillerstrasse, gebhardsberg_ruin, pfaenderbahn, sender, gipfelkreuz, wildpark, pfaenderdohle,
                harbour_detail):
         try:
