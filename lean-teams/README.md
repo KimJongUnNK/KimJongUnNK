@@ -4,7 +4,7 @@ Ein schlanker, inoffizieller Desktop-Client für Microsoft Teams. Er ist ein nat
 
 | | Offizieller Client | Lean Teams |
 |---|---|---|
-| Programm | MSIX-Paket, Microsoft verlangt 3 GB (Win) bzw. 1,5 GB (macOS) freien Platz | **6,1 MB** Binary (Linux, gemessen), `.deb` 2,5 MB |
+| Programm | MSIX-Paket, Microsoft verlangt 3 GB (Win) bzw. 1,5 GB (macOS) freien Platz | **6,1 MB** Binary + `.deb` 2,5 MB (Linux), **9 MB** `.app` + `.dmg` 3,9 MB (macOS, Universal Intel + Apple Silicon), jeweils gemessen |
 | Browser-Engine | WebView2 (Win), auf macOS **mitgebündelt** | System-WebView: WebView2 (Win), WKWebView (macOS), WebKitGTK (Linux) |
 | Prozesse beim Start | Host, WebView2-Baum, Outlook-/Meeting-Add-in, Preloading | Host + ein WebView-Baum |
 | RAM im Hintergrund | läuft normal weiter | Windows: WebView2 `MemoryUsageTargetLevel = Low`, sobald versteckt oder minimiert |
