@@ -19,12 +19,12 @@ struct WaitSlot;
 
 impl WaitSlot {
     fn acquire() -> Option<Self> {
-        WAITING
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < MAX_WAITING).then_some(n + 1)
-            })
-            .ok()
-            .map(|_| Self)
+        if WAITING.fetch_add(1, Ordering::AcqRel) < MAX_WAITING {
+            Some(Self)
+        } else {
+            WAITING.fetch_sub(1, Ordering::AcqRel);
+            None
+        }
     }
 }
 
