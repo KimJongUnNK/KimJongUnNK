@@ -16,13 +16,18 @@ pub const DEFAULT_URL: &str = "https://teams.microsoft.com/v2/";
 /// does not recognise, which is what WebKitGTK reports itself as on Linux.
 pub const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
+/// Safari's user agent. WKWebView leaves out the `Version/… Safari/…` tokens,
+/// so without this Teams treats the app as an unknown browser.
+pub const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Page loaded on start and by "Home" in the tray menu.
     pub url: String,
-    /// Overrides the webview user agent. `None` keeps the platform default,
-    /// except on Linux where a Chrome UA is used (see [`CHROME_UA`]).
+    /// Overrides the webview user agent. `None` keeps the platform default on
+    /// Windows, Safari's on macOS ([`SAFARI_UA`]) and Chrome's on Linux
+    /// ([`CHROME_UA`]).
     pub user_agent: Option<String>,
     /// Windows only: tell WebView2 to trim memory while the window is hidden or
     /// minimized (`ICoreWebView2_19::MemoryUsageTargetLevel = Low`).
@@ -99,6 +104,7 @@ impl Config {
         match &self.user_agent {
             Some(ua) if !ua.trim().is_empty() => Some(ua.clone()),
             _ if cfg!(target_os = "linux") => Some(CHROME_UA.into()),
+            _ if cfg!(target_os = "macos") => Some(SAFARI_UA.into()),
             _ => None,
         }
     }
@@ -189,10 +195,7 @@ mod tests {
             user_agent: Some("  ".into()),
             ..Config::default()
         };
-        assert_eq!(
-            c.effective_user_agent().is_some(),
-            cfg!(target_os = "linux")
-        );
+        assert_eq!(c.effective_user_agent().is_some(), !cfg!(windows));
     }
 
     #[test]

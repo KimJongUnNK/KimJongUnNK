@@ -10,7 +10,7 @@ Ein schlanker, inoffizieller Desktop-Client für Microsoft Teams. Er ist ein nat
 | RAM im Hintergrund | läuft normal weiter | Windows: WebView2 `MemoryUsageTargetLevel = Low`, sobald versteckt oder minimiert |
 | Disk-Cache | unbegrenzt (Chromium-Default) | auf 256 MB begrenzt (einstellbar), "Cache leeren" im Tray, Login bleibt |
 
-> **Ehrliche Einordnung:** Der neue Teams-Client nutzt auf Windows schon WebView2. Der RAM-Gewinn auf Windows ist deshalb real, aber moderat, keine Größenordnung. Er kommt durch weniger Prozesse, keine Add-ins und den Low-Memory-Modus im Tray. **Massiv** ist der Gewinn beim Speicherplatz und auf **macOS**, wo der offizielle Client eine eigene WebView2-Runtime mitschleppt (Nutzerberichte: rund 1 GB App-Größe). Messen statt glauben: [`scripts/measure.ps1`](scripts/measure.ps1).
+> **Ehrliche Einordnung:** Der neue Teams-Client nutzt auf Windows schon WebView2. Der RAM-Gewinn auf Windows ist deshalb real, aber moderat, keine Größenordnung. Er kommt durch weniger Prozesse, keine Add-ins und den Low-Memory-Modus im Tray. **Massiv** ist der Gewinn beim Speicherplatz und auf **macOS**, wo der offizielle Client eine eigene WebView2-Runtime mitschleppt (Nutzerberichte: rund 1 GB App-Größe). Messen statt glauben: [`scripts/measure.ps1`](scripts/measure.ps1) (Windows) und [`scripts/measure-macos.sh`](scripts/measure-macos.sh) (macOS).
 
 ## Warum kein "echter Klon" per Reverse Engineering?
 
@@ -31,7 +31,7 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 Fertige Installer baut die GitHub Action [`.github/workflows/lean-teams.yml`](../.github/workflows/lean-teams.yml) bei jedem Push. Du findest sie unter *Actions → Lean Teams → Artifacts*:
 
 - **Windows:** `Lean Teams_x.y.z_x64-setup.exe` (NSIS, ohne Admin) oder `.msi`. Die WebView2-Runtime ist auf Win 10/11 vorinstalliert, fehlt sie, lädt der Installer sie nach.
-- **macOS:** `.dmg` (Universal: Apple Silicon + Intel). Da das Paket unsigniert ist, beim ersten Start Rechtsklick → Öffnen.
+- **macOS:** `.dmg` (Universal: Apple Silicon + Intel). Details im Abschnitt [macOS](#macos).
 - **Linux:** `.deb` (2,5 MB, nutzt System-WebKitGTK) oder `.AppImage` (78 MB, bringt WebKitGTK mit).
 
 ### Selbst bauen
@@ -51,6 +51,42 @@ npx @tauri-apps/cli@2.12.4 build
 
 Die Installer landen in `src-tauri/target/release/bundle/`.
 
+## macOS
+
+### Installieren
+
+1. Das Artifact `lean-teams-macOS` aus *Actions → Lean Teams* laden, entpacken und `Lean Teams_x.y.z_universal.dmg` öffnen.
+2. `Lean Teams.app` nach *Programme* ziehen.
+3. Die App ist nur ad-hoc signiert, nicht von Apple notarisiert. Gatekeeper blockt deshalb den ersten Start. Seit macOS 15 gibt es dafür kein Rechtsklick → Öffnen mehr. Entweder *Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“* klicken, oder einmal im Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Lean Teams.app"
+```
+
+4. Beim ersten Anruf fragt macOS nach Kamera- und Mikrofonzugriff, einmal erlauben.
+
+### Was auf dem Mac anders ist
+
+- **Engine:** WKWebView, also dieselbe WebKit-Engine wie Safari. Sie ist Teil von macOS. Der offizielle Client bringt dagegen eine eigene Chromium/WebView2-Runtime mit. Hier liegt der größte Speicher-Gewinn des ganzen Projekts.
+- **User-Agent:** Lean Teams meldet sich als Safari. WKWebView lässt den `Safari/…`-Teil sonst weg, und Teams behandelt die App dann als unbekannten Browser.
+- **Menüleiste:** Monochromes Template-Icon, macOS färbt es automatisch für Hell- und Dunkelmodus.
+- **Dock:** Fenster schließen versteckt nur, ein Klick aufs Dock-Icon holt es zurück. Die Ungelesen-Zahl erscheint als rote Badge am Dock-Icon. Mit ⌘Q wird wirklich beendet.
+- **Cache leeren** (Menüleiste): Löscht Disk-, Memory-, Fetch- und App-Cache von WebKit. Cookies, Local Storage und IndexedDB bleiben, du bleibst also eingeloggt.
+- **Notifications:** Kommen als macOS-Mitteilungen von „Lean Teams“. Ein Klick holt das Fenster nach vorn.
+- **Nicht auf dem Mac:** `low_memory_when_hidden`, `disk_cache_mb`, `renderer_process_limit` und `extra_browser_args` sind WebView2-Schalter und werden ignoriert. WKWebView hat dafür keine öffentliche API. macOS komprimiert und lagert den Speicher von Hintergrund-Apps aber ohnehin selbst aus.
+- **Calls:** Es gilt der Safari-Support von Teams. Chat, Kanäle, Dateien, Audio und Video laufen. Bei Screen-Sharing und Hintergrundeffekten ist Teams auf Safari eingeschränkter als auf Chromium.
+
+### Messen
+
+```bash
+sudo bash lean-teams/scripts/measure-macos.sh
+```
+
+- **RAM:** Summiert wird der RSS des ganzen Fußabdrucks. Bei Teams ist das `MSTeams` mit allen WebView-Helper-Prozessen.
+- **Lean Teams:** Gezählt wird der Host plus die WebKit-Prozesse, die für ihn arbeiten. Das sind XPC-Dienste von macOS, keine Kindprozesse. Sie werden über den „responsible process“ von launchd zugeordnet, deshalb braucht das Skript `sudo`. Ohne `sudo` zählt es jeden WebKit-Prozess auf dem Mac mit, also auch Safari und Mail, und liefert nur eine Obergrenze.
+- **Disk:** Gemessen werden App-Bundle plus Benutzerdaten (`~/Library/Containers`, `Group Containers`, `WebKit`, `Caches`).
+- **Fairer Vergleich:** Gleicher Account, gleicher Chat, 2 Minuten warten. Einmal mit sichtbaren Fenstern messen, einmal mit beiden im Hintergrund.
+
 ## Einstellungen
 
 Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* öffnet sie. Änderungen greifen nach einem Neustart.
@@ -64,7 +100,7 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 | Feld | Default | Wirkung |
 |---|---|---|
 | `url` | `https://teams.microsoft.com/v2/` | Startseite. Für private Konten: `https://teams.live.com/v2/` |
-| `user_agent` | `null` | Eigener User-Agent. `null` = Plattform-Default, auf Linux ein Chrome-UA, weil Teams WebKitGTK sonst ablehnt |
+| `user_agent` | `null` | Eigener User-Agent. `null` = Plattform-Default auf Windows, Safari-UA auf macOS, Chrome-UA auf Linux (Teams lehnt die nackten WebKit-UAs ab) |
 | `low_memory_when_hidden` | `true` | Windows: WebView2 trimmt RAM, solange das Fenster versteckt oder minimiert ist. Calls und Notifications laufen weiter |
 | `disk_cache_mb` | `256` | Windows: Obergrenze des HTTP-Caches (`--disk-cache-size`). `0` = Chromium-Default |
 | `renderer_process_limit` | `0` | Windows: Obergrenze für Renderer-Prozesse (`--renderer-process-limit`). `2` spart RAM, kann aber große Meetings ruckeln lassen. `0` = Default |
@@ -75,6 +111,8 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 Kaputtes JSON führt nicht zum Absturz, die App startet dann mit Defaults und schreibt eine Warnung auf stderr.
 
 ## Messen (Windows)
+
+Für macOS siehe [macOS → Messen](#messen).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\lean-teams\scripts\measure.ps1
@@ -103,6 +141,7 @@ Alle anderen Origins, also SSO-Provider und beliebige Seiten nach einem Redirect
 ```
 lean-teams/
 ├── scripts/measure.ps1          RAM/Disk-Vergleich (Windows)
+├── scripts/measure-macos.sh     RAM/Disk-Vergleich (macOS)
 ├── assets/icon-source.png       Quelle für alle Icons (npx @tauri-apps/cli icon)
 └── src-tauri/
     ├── capabilities/teams.json  IPC-Freigaben für die Teams-Origins
@@ -113,6 +152,7 @@ lean-teams/
         ├── policy.rs            Link-Routing + Ungelesen-Parser (pure, getestet)
         ├── notify.rs            OS-Notifications via notify-rust
         ├── webview2.rs          Windows: Memory-Target + Cache leeren (COM)
+        ├── macos.rs             macOS: Cache leeren (WKWebsiteDataStore)
         ├── notification-shim.js Web-Notification-API → IPC
         └── link-shim.js         Linux: target=_blank-Links → IPC
 ```
@@ -132,7 +172,7 @@ cargo clippy --all-targets -- -D warnings
 cargo run
 ```
 
-Die CI führt `fmt`, `clippy` und die Tests aus und baut danach Installer für Windows, macOS und Linux.
+Die CI führt `fmt`, `clippy` und die Tests aus und baut danach Installer für Windows, macOS und Linux. Auf dem macOS-Runner prüft sie außerdem die Signatur und die Universal-Architektur, startet die App und lässt `measure-macos.sh` gegen die laufende App laufen.
 
 **Warum kein `tauri-plugin-notification`?** Das Plugin injiziert ein eigenes `window.Notification`-Polyfill in jede Seite. Das ruft Plugin-Befehle auf, die die Teams-Origin nicht nutzen darf, und hätte Notifications mit `native_notifications: false` komplett abgeschaltet. Aus demselben Grund ist der Link-Handler des Opener-Plugins (`open_js_links_on_click`) deaktiviert, denn mit ihm wären alle Chat-Links stumm verschluckt worden.
 

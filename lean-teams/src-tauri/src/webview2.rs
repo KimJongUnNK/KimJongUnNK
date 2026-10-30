@@ -35,9 +35,10 @@ pub fn set_low_memory<R: Runtime>(webview: &Webview<R>, low: bool) {
 }
 
 /// Deletes the HTTP disk cache and Cache Storage, keeping cookies and local
-/// storage so the user stays signed in.
+/// storage so the user stays signed in, then reloads the page.
 pub fn clear_cache<R: Runtime>(webview: &Webview<R>) {
-    let _ = webview.with_webview(|platform| unsafe {
+    let reload_target = webview.clone();
+    let _ = webview.with_webview(move |platform| unsafe {
         let Ok(core) = platform.controller().CoreWebView2() else {
             return;
         };
@@ -52,7 +53,10 @@ pub fn clear_cache<R: Runtime>(webview: &Webview<R>) {
             COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0
                 | COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE.0,
         );
-        let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_| Ok(())));
+        let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |_| {
+            let _ = reload_target.reload();
+            Ok(())
+        }));
         let _ = profile.ClearBrowsingData(kinds, &handler);
     });
 }

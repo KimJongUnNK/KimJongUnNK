@@ -8,6 +8,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+#[cfg(target_os = "macos")]
+mod macos;
 mod notify;
 mod policy;
 #[cfg(windows)]
@@ -241,7 +243,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = || PredefinedMenuItem::separator(app);
 
     let menu = Menu::with_items(app, &[&show, &home, &reload, &sep()?])?;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let clear = MenuItem::with_id(
             app,
@@ -272,11 +274,13 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     let _ = w.reload();
                 }
             }
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             "clear-cache" => {
                 if let Some(w) = app.get_webview_window(MAIN) {
+                    #[cfg(windows)]
                     webview2::clear_cache(w.as_ref());
-                    let _ = w.reload();
+                    #[cfg(target_os = "macos")]
+                    macos::clear_cache(w.as_ref());
                 }
             }
             "autostart" => {
@@ -311,6 +315,17 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 toggle_main(tray.app_handle());
             }
         });
+    // The menu bar expects a monochrome template image that macOS tints for
+    // light/dark mode; the colored app icon looks out of place there.
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray
+            .icon(tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/tray-template.png"
+            ))?)
+            .icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -381,16 +396,15 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("failed to start Lean Teams")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // Keep running in the tray when the last window is hidden.
-            if let tauri::RunEvent::ExitRequested {
+            tauri::RunEvent::ExitRequested {
                 code: None, api, ..
-            } = event
-            {
-                if app.state::<AppState>().config.close_to_tray {
-                    api.prevent_exit();
-                }
-            }
+            } if app.state::<AppState>().config.close_to_tray => api.prevent_exit(),
+            // Clicking the Dock icon brings back a window closed to the tray.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main(app),
+            _ => {}
         });
 }
 

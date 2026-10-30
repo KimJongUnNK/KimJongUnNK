@@ -32,6 +32,8 @@ jobs:
         working-directory: lean-teams/src-tauri
       - run: cargo test
         working-directory: lean-teams/src-tauri
+      - name: Check measure-macos.sh syntax
+        run: bash -n scripts/measure-macos.sh
 
   build:
     needs: test
@@ -71,6 +73,21 @@ jobs:
           if ($errors) { $errors; exit 1 }
       - name: Build
         run: npx --yes @tauri-apps/cli@2.12.4 build ${{ matrix.args }}
+      - name: macOS smoke test (signature, launch, measure script)
+        if: runner.os == 'macOS'
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Lean Teams.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Signature|Format)"
+          lipo -archs "$APP/Contents/MacOS/lean-teams"
+          open "$APP"
+          for i in $(seq 1 30); do pgrep -f "Lean Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          sleep 20
+          ps -axo pid,ppid,rss,command | grep -E "lean-teams|com\.apple\.WebKit" | grep -v grep || true
+          for p in $(pgrep -f "com.apple.WebKit"); do sudo launchctl procinfo "$p" 2>/dev/null | grep -i "responsible" || true; done
+          sudo SAMPLES=2 INTERVAL=1 bash scripts/measure-macos.sh | tee measure.txt
+          grep -E "^Lean Teams +yes" measure.txt
+          pkill -f "Lean Teams.app/Contents/MacOS/lean-teams" || true
       - uses: actions/upload-artifact@v4
         with:
           name: lean-teams-${{ runner.os }}

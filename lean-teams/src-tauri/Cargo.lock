@@ -1940,7 +1940,10 @@ dependencies = [
 name = "lean-teams"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "notify-rust",
+ "objc2-foundation",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "tauri",

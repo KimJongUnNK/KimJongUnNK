@@ -24,6 +24,11 @@ url = "2"
 webview2-com = "0.39"
 windows-core = "0.62"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSSet", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord"] }
+
 [profile.release]
 # Size over speed: the heavy lifting happens inside the system webview anyway.
 codegen-units = 1
