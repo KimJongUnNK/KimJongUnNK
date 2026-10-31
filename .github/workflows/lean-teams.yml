@@ -73,6 +73,24 @@ jobs:
           if ($errors) { $errors; exit 1 }
       - name: Build
         run: npx --yes @tauri-apps/cli@2.12.4 build ${{ matrix.args }}
+      - name: Windows smoke test (launch, measure script)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $exe = Resolve-Path 'src-tauri/target/release/lean-teams.exe'
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          if ($proc.HasExited) { throw "lean-teams.exe exited early with code $($proc.ExitCode)" }
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'lean-teams.exe', 'msedgewebview2.exe' } |
+            Select-Object ProcessId, ParentProcessId, Name | Format-Table -AutoSize
+          # Windows PowerShell 5.1 (what most users run) and PowerShell 7.
+          $out51 = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out51
+          if ($LASTEXITCODE -ne 0 -or $out51 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under Windows PowerShell 5.1' }
+          $out7 = pwsh -NoProfile -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out7
+          if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
+          Stop-Process -Id $proc.Id -Force
       - name: macOS smoke test (signature, launch, measure script)
         if: runner.os == 'macOS'
         run: |

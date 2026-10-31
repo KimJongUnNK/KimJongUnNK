@@ -101,7 +101,8 @@ for ($i = 0; $i -lt $Samples; $i++) {
 }
 
 # --- Disk ------------------------------------------------------------------
-$teamsPackage = Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue | Select-Object -First 1
+# The Appx module can fail to load under PowerShell 7; treat that as "not found".
+$teamsPackage = try { Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { $null }
 $teamsInstall = if ($teamsPackage) { $teamsPackage.InstallLocation } else { $null }
 $teamsData = Join-Path $env:LOCALAPPDATA 'Packages\MSTeams_8wekyb3d8bbwe'
 
@@ -131,14 +132,16 @@ $disk = @{
 
 # --- Report ----------------------------------------------------------------
 $rows = foreach ($app in $apps) {
-    $samples = $ram[$app.Name]
-    $ws = if ($samples.Count) { ($samples | Measure-Object -Property WorkingSet -Average).Average } else { 0 }
-    $pv = if ($samples.Count) { ($samples | Measure-Object -Property Private -Average).Average } else { 0 }
-    $procs = if ($samples.Count) { $samples[$samples.Count - 1].Processes } else { 0 }
+    # Not "$samples": PowerShell variables are case-insensitive, so that would
+    # be the [int]$Samples parameter and assigning a list to it throws.
+    $appSamples = $ram[$app.Name]
+    $ws = if ($appSamples.Count) { ($appSamples | Measure-Object -Property WorkingSet -Average).Average } else { 0 }
+    $pv = if ($appSamples.Count) { ($appSamples | Measure-Object -Property Private -Average).Average } else { 0 }
+    $procs = if ($appSamples.Count) { $appSamples[$appSamples.Count - 1].Processes } else { 0 }
     $d = $disk[$app.Name]
     [pscustomobject]@{
         App          = $app.Name
-        Running      = [bool]$samples.Count
+        Running      = [bool]$appSamples.Count
         Processes    = $procs
         'Working set' = Format-MB $ws
         'Private'    = Format-MB $pv
