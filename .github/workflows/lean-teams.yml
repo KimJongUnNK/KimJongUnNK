@@ -1,0 +1,118 @@
+name: Lean Teams
+
+on:
+  push:
+    paths: ["lean-teams/**", ".github/workflows/lean-teams.yml"]
+  pull_request:
+    paths: ["lean-teams/**", ".github/workflows/lean-teams.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: lean-teams
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lean-teams/src-tauri
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - run: cargo fmt --check
+        working-directory: lean-teams/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: lean-teams/src-tauri
+      - run: cargo test
+        working-directory: lean-teams/src-tauri
+      - name: Check measure-macos.sh syntax
+        run: bash -n scripts/measure-macos.sh
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ""
+          - os: macos-latest
+            args: "--target universal-apple-darwin"
+          - os: ubuntu-24.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lean-teams/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - name: Check measure.ps1 syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/measure.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }
+      - name: Build
+        run: npx --yes @tauri-apps/cli@2.12.4 build ${{ matrix.args }}
+      - name: Windows smoke test (launch, measure script)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $exe = Resolve-Path 'src-tauri/target/release/lean-teams.exe'
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          if ($proc.HasExited) { throw "lean-teams.exe exited early with code $($proc.ExitCode)" }
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'lean-teams.exe', 'msedgewebview2.exe' } |
+            Select-Object ProcessId, ParentProcessId, Name | Format-Table -AutoSize
+          # Windows PowerShell 5.1 (what most users run) and PowerShell 7.
+          $out51 = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out51
+          if ($LASTEXITCODE -ne 0 -or $out51 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under Windows PowerShell 5.1' }
+          $out7 = pwsh -NoProfile -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out7
+          if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
+          Stop-Process -Id $proc.Id -Force
+      - name: macOS smoke test (signature, launch, measure script)
+        if: runner.os == 'macOS'
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Lean Teams.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Signature|Format)"
+          lipo -archs "$APP/Contents/MacOS/lean-teams"
+          open "$APP"
+          for i in $(seq 1 30); do pgrep -f "Lean Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          sleep 20
+          ps -axo pid,ppid,rss,command | grep -E "lean-teams|com\.apple\.WebKit" | grep -v grep || true
+          for p in $(pgrep -f "com.apple.WebKit"); do sudo launchctl procinfo "$p" 2>/dev/null | grep -i "responsible" || true; done
+          sudo SAMPLES=2 INTERVAL=1 bash scripts/measure-macos.sh | tee measure.txt
+          grep -E "^Lean Teams +yes" measure.txt
+          pkill -f "Lean Teams.app/Contents/MacOS/lean-teams" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lean-teams-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            lean-teams/src-tauri/target/**/release/bundle/nsis/*.exe
+            lean-teams/src-tauri/target/**/release/bundle/msi/*.msi
+            lean-teams/src-tauri/target/**/release/bundle/dmg/*.dmg
+            lean-teams/src-tauri/target/**/release/bundle/deb/*.deb
+            lean-teams/src-tauri/target/**/release/bundle/appimage/*.AppImage
