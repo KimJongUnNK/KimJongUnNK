@@ -19,6 +19,9 @@
 #
 #   sudo bash measure-macos.sh
 #
+# Compare another pair instead of Teams: `sudo bash measure-macos.sh discord`
+# measures the official Discord app against Dorion (a WebKit-based client).
+#
 # Options via environment: SAMPLES (default 5), INTERVAL in seconds (default 2).
 # Written for the bash 3.2 that ships with macOS.
 
@@ -27,8 +30,6 @@ set -u
 SAMPLES=${SAMPLES:-5}
 INTERVAL=${INTERVAL:-2}
 # Overridable for testing on other systems.
-TEAMS_PATTERN=${TEAMS_PATTERN:-"/Microsoft Teams.app/Contents/MacOS/"}
-LEAN_PATTERN=${LEAN_PATTERN:-"/Lean Teams.app/Contents/MacOS/lean-teams"}
 WEBKIT_PATTERN=${WEBKIT_PATTERN:-"com.apple.WebKit."}
 
 IS_ROOT=0
@@ -38,6 +39,43 @@ USER_HOME=$HOME
 if [ -n "${SUDO_USER:-}" ]; then
     USER_HOME=$(eval echo "~$SUDO_USER")
 fi
+
+# Which pair to compare: the "official" app (child processes counted as a
+# tree) against the "lean" one (plus the WebKit XPC helpers working for it).
+SUPPORT="$USER_HOME/Library/Application Support"
+case "${1:-teams}" in
+    discord)
+        OFFICIAL_LABEL="Discord"
+        LEAN_LABEL="Dorion"
+        TEAMS_PATTERN=${TEAMS_PATTERN:-"/Discord.app/Contents/MacOS/"}
+        LEAN_PATTERN=${LEAN_PATTERN:-"/Dorion.app/Contents/MacOS/"}
+        OFFICIAL_APP="/Applications/Discord.app"
+        LEAN_APP="/Applications/Dorion.app"
+        OFFICIAL_DATA=("$SUPPORT/discord" "$USER_HOME/Library/Caches/com.hnc.Discord")
+        LEAN_DATA=("$SUPPORT"/*[Dd]orion* "$USER_HOME/Library/WebKit"/*[Dd]orion* "$USER_HOME/Library/Caches"/*[Dd]orion*)
+        ;;
+    teams)
+        OFFICIAL_LABEL="Microsoft Teams"
+        LEAN_LABEL="Lean Teams"
+        OFFICIAL_APP="/Applications/Microsoft Teams.app"
+        LEAN_APP="/Applications/Lean Teams.app"
+        OFFICIAL_DATA=(
+            "$USER_HOME/Library/Containers/com.microsoft.teams2"
+            "$USER_HOME/Library/Group Containers/UBF8T346G9.com.microsoft.teams"
+            "$SUPPORT/Microsoft/Teams")
+        LEAN_DATA=(
+            "$SUPPORT/dev.leanteams.app"
+            "$USER_HOME/Library/WebKit/dev.leanteams.app"
+            "$USER_HOME/Library/Caches/dev.leanteams.app"
+            "$USER_HOME/Library/HTTPStorages/dev.leanteams.app")
+        ;;
+    *)
+        echo "usage: measure-macos.sh [teams|discord]" >&2
+        exit 2
+        ;;
+esac
+TEAMS_PATTERN=${TEAMS_PATTERN:-"/Microsoft Teams.app/Contents/MacOS/"}
+LEAN_PATTERN=${LEAN_PATTERN:-"/Lean Teams.app/Contents/MacOS/lean-teams"}
 
 # PIDs whose executable path contains $1 (fixed string). Processes that only
 # carry it as an argument (this script's own awk, shells, `open`) are skipped:
@@ -150,17 +188,10 @@ teams_ram=0; lean_ram=0
 [ "$lean_n" -gt 0 ] && lean_ram=$((lean_sum / lean_n))
 
 # --- Disk --------------------------------------------------------------------
-teams_app=$(du_kb "/Applications/Microsoft Teams.app")
-teams_data=$(du_kb \
-    "$USER_HOME/Library/Containers/com.microsoft.teams2" \
-    "$USER_HOME/Library/Group Containers/UBF8T346G9.com.microsoft.teams" \
-    "$USER_HOME/Library/Application Support/Microsoft/Teams")
-lean_app=$(du_kb "/Applications/Lean Teams.app")
-lean_data=$(du_kb \
-    "$USER_HOME/Library/Application Support/dev.leanteams.app" \
-    "$USER_HOME/Library/WebKit/dev.leanteams.app" \
-    "$USER_HOME/Library/Caches/dev.leanteams.app" \
-    "$USER_HOME/Library/HTTPStorages/dev.leanteams.app")
+teams_app=$(du_kb "$OFFICIAL_APP")
+teams_data=$(du_kb "${OFFICIAL_DATA[@]}")
+lean_app=$(du_kb "$LEAN_APP")
+lean_data=$(du_kb "${LEAN_DATA[@]}")
 
 # --- Report ------------------------------------------------------------------
 echo
@@ -171,21 +202,21 @@ row() {
     printf '%-16s %-8s %-10s %-10s %-10s %-10s %-10s\n' \
         "$1" "$running" "$2" "$(mb "$3")" "$(mb "$4")" "$(mb "$5")" "$(mb $(($4 + $5)))"
 }
-row "Microsoft Teams" "$teams_procs" "$teams_ram" "$teams_app" "$teams_data"
-row "Lean Teams" "$lean_procs" "$lean_ram" "$lean_app" "$lean_data"
+row "$OFFICIAL_LABEL" "$teams_procs" "$teams_ram" "$teams_app" "$teams_data"
+row "$LEAN_LABEL" "$lean_procs" "$lean_ram" "$lean_app" "$lean_data"
 echo
 
 if [ "$teams_ram" -gt 0 ] && [ "$lean_ram" -gt 0 ]; then
-    awk -v a="$lean_ram" -v b="$teams_ram" 'BEGIN { printf "RAM: Lean Teams uses %.0f%% of Microsoft Teams\n", 100 * a / b }'
+    awk -v a="$lean_ram" -v b="$teams_ram" -v x="$LEAN_LABEL" -v y="$OFFICIAL_LABEL" 'BEGIN { printf "RAM: %s uses %.0f%% of %s\n", x, 100 * a / b, y }'
 fi
 teams_disk=$((teams_app + teams_data)); lean_disk=$((lean_app + lean_data))
 if [ "$teams_disk" -gt 0 ] && [ "$lean_disk" -gt 0 ]; then
-    awk -v a="$lean_disk" -v b="$teams_disk" 'BEGIN { printf "Disk: Lean Teams uses %.0f%% of Microsoft Teams\n", 100 * a / b }'
+    awk -v a="$lean_disk" -v b="$teams_disk" -v x="$LEAN_LABEL" -v y="$OFFICIAL_LABEL" 'BEGIN { printf "Disk: %s uses %.0f%% of %s\n", x, 100 * a / b, y }'
 fi
-[ "$teams_n" -eq 0 ] && echo "Microsoft Teams is not running - start it to include its RAM usage."
-[ "$lean_n" -eq 0 ] && echo "Lean Teams is not running - start it to include its RAM usage."
+[ "$teams_n" -eq 0 ] && echo "$OFFICIAL_LABEL is not running - start it to include its RAM usage."
+[ "$lean_n" -eq 0 ] && echo "$LEAN_LABEL is not running - start it to include its RAM usage."
 if [ "$lean_n" -gt 0 ] && [ "$lean_exact" -eq 0 ]; then
-    echo "Note: Lean Teams RAM includes every WebKit process on this Mac (Safari, Mail, ...)."
+    echo "Note: $LEAN_LABEL RAM includes every WebKit process on this Mac (Safari, Mail, ...)."
     echo "      Run with sudo for the exact number, or quit other WebKit apps first."
 fi
 if [ "$IS_ROOT" -eq 0 ] && [ -d "$USER_HOME/Library/Containers/com.microsoft.teams2" ]; then
