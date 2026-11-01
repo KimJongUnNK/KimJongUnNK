@@ -28,7 +28,7 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 
 ## Installieren
 
-Fertige Installer baut die GitHub Action [`.github/workflows/lean-teams.yml`](../.github/workflows/lean-teams.yml) bei jedem Push. Du findest sie unter *Actions → Lean Teams → Artifacts*:
+Fertige Installer baut die GitHub Action [`.github/workflows/lean-teams.yml`](../.github/workflows/lean-teams.yml) bei jedem Push. Sie veröffentlicht sie als Release [`lean-teams-latest`](https://github.com/KimJongUnNK/KimJongUnNK/releases/tag/lean-teams-latest), also mit festen Links und ohne GitHub-Login:
 
 - **Windows:** `Lean Teams_x.y.z_x64-setup.exe` (NSIS, ohne Admin) oder `.msi`. Die WebView2-Runtime ist auf Win 10/11 vorinstalliert, fehlt sie, lädt der Installer sie nach.
 - **macOS:** `.dmg` (Universal: Apple Silicon + Intel). Details im Abschnitt [macOS](#macos).
@@ -55,7 +55,15 @@ Die Installer landen in `src-tauri/target/release/bundle/`.
 
 ### Installieren
 
-1. Das Artifact `lean-teams-macOS` aus *Actions → Lean Teams* laden, entpacken und `Lean Teams_x.y.z_universal.dmg` öffnen.
+**Schnellster Weg:** ein Befehl im Terminal. Er lädt den neuesten Build, installiert ihn nach *Programme*, entfernt die Gatekeeper-Sperre und startet die App. Derselbe Befehl aktualisiert später auch.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KimJongUnNK/KimJongUnNK/claude/nifty-ptolemy-d2ami7/lean-teams/scripts/install-macos.sh | bash
+```
+
+Von Hand:
+
+1. `LeanTeams-macOS-universal.dmg` aus dem Release [`lean-teams-latest`](https://github.com/KimJongUnNK/KimJongUnNK/releases/tag/lean-teams-latest) laden und öffnen.
 2. `Lean Teams.app` nach *Programme* ziehen.
 3. Die App ist nur ad-hoc signiert, nicht von Apple notarisiert. Gatekeeper blockt deshalb den ersten Start. Seit macOS 15 gibt es dafür kein Rechtsklick → Öffnen mehr. Entweder *Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“* klicken, oder einmal im Terminal:
 

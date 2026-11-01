@@ -116,3 +116,61 @@ jobs:
             lean-teams/src-tauri/target/**/release/bundle/dmg/*.dmg
             lean-teams/src-tauri/target/**/release/bundle/deb/*.deb
             lean-teams/src-tauri/target/**/release/bundle/appimage/*.AppImage
+
+  # Every push publishes the installers as a rolling pre-release with fixed
+  # asset names, so they can be downloaded without a GitHub login and with a
+  # stable URL (scripts/install-macos.sh relies on it).
+  release:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: lean-teams-release
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect installers under stable names
+        run: |
+          mkdir dist
+          pick() { f=$(find artifacts -name "$1" | head -1); test -n "$f" || { echo "missing $1"; exit 1; }; cp "$f" "dist/$2"; }
+          pick '*.dmg'        LeanTeams-macOS-universal.dmg
+          pick '*-setup.exe'  LeanTeams-Windows-x64-setup.exe
+          pick '*.msi'        LeanTeams-Windows-x64.msi
+          pick '*.deb'        LeanTeams-Linux-amd64.deb
+          pick '*.AppImage'   LeanTeams-Linux-amd64.AppImage
+          ls -la dist
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete lean-teams-latest --cleanup-tag --yes || true
+          gh release create lean-teams-latest dist/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Lean Teams (latest build)" \
+            --notes "Automatic build of ${GITHUB_SHA::7}. Unsigned: on macOS run scripts/install-macos.sh, on Windows choose 'More info → Run anyway' in SmartScreen."
+
+  # End-to-end check of the one-line macOS install against the release above.
+  verify-macos-install:
+    needs: release
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install via scripts/install-macos.sh and launch
+        run: |
+          bash lean-teams/scripts/install-macos.sh
+          for i in $(seq 1 30); do pgrep -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          pgrep -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams"
+          codesign --verify --deep --strict "/Applications/Lean Teams.app"
+          pkill -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams" || true
