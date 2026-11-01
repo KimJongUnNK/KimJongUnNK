@@ -137,6 +137,15 @@ for path in "$USER_HOME/Library/Caches"/com.wondershare.* "$USER_HOME/Library/Ca
     delete_path "$path" "cache/log"
 done
 
+say "Disk usage of Filmora's own data (report only, never deleted here):"
+for dir in "$USER_HOME/Library/Application Support/Wondershare" "$USER_HOME/Movies/Wondershare Filmora" "$USER_HOME/Documents/Wondershare Filmora" "$USER_HOME/Library/Containers"/*[Ww]ondershare* "$USER_HOME/Library/Group Containers"/*[Ww]ondershare*; do
+    [ -d "$dir" ] || continue
+    say "  $(size_of "$dir")  $dir"
+    find "$dir" -mindepth 1 -maxdepth 2 -type d -exec du -sk {} + 2>/dev/null |
+        sort -rn | head -5 | awk '$1 > 102400 { printf "      %6.1f GB  %s\n", $1 / 1048576, substr($0, index($0, $2)) }'
+done
+say "  Render and proxy files are best cleared from inside Filmora (its preferences / render cache settings)."
+
 say
 if [ "$found" -eq 0 ]; then
     say "Nothing found - no Wondershare background services on this Mac."
