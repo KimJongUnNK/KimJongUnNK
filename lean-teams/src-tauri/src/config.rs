@@ -4,6 +4,7 @@
 //! fields are ignored and a broken file falls back to defaults instead of
 //! preventing the app from starting.
 
+use crate::overlay::OverlayConfig;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
@@ -45,6 +46,8 @@ pub struct Config {
     pub native_notifications: bool,
     /// Closing the window hides it to the tray instead of quitting.
     pub close_to_tray: bool,
+    /// Accent color, zoom, privacy blur, custom.css, always on top.
+    pub overlay: OverlayConfig,
 }
 
 impl Default for Config {
@@ -58,6 +61,7 @@ impl Default for Config {
             extra_browser_args: String::new(),
             native_notifications: true,
             close_to_tray: true,
+            overlay: OverlayConfig::default(),
         }
     }
 }
@@ -79,6 +83,13 @@ impl Config {
                 config
             }
         }
+    }
+
+    /// Writes the config back, e.g. after the overlay menu changed it.
+    pub fn save(&self, dir: &Path) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        fs::write(dir.join(FILE_NAME), json).map_err(|e| e.to_string())
     }
 
     pub fn parse(text: &str) -> Self {

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "teams-remote",
-  "description": "The only IPC surface exposed to the Teams web app: native notifications, and opening chat links in the default browser.",
+  "description": "The only IPC surface exposed to the Teams web app: native notifications, opening chat links in the default browser, and the overlay menu (read/save overlay settings and custom.css, switch existing mods on or off, open the config folder, open dev tools). Nothing here can create or edit JS mods.",
   "windows": ["main"],
   "remote": {
     "urls": [
@@ -10,5 +10,13 @@
       "https://teams.live.com/*"
     ]
   },
-  "permissions": ["allow-notify", "allow-open-link"]
+  "permissions": [
+    "allow-notify",
+    "allow-open-link",
+    "allow-overlay-state",
+    "allow-overlay-save",
+    "allow-overlay-toggle-mod",
+    "allow-overlay-open-folder",
+    "allow-overlay-devtools"
+  ]
 }

@@ -10,7 +10,7 @@ description = "Unofficial lightweight desktop shell for the Microsoft Teams web 
 tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-single-instance = "2.5"
 notify-rust = "4.18"
 tauri-plugin-opener = "2.7"

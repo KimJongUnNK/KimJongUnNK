@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-overlay-open-folder"
+description = "Enables the overlay_open_folder command without any pre-configured scope."
+commands.allow = ["overlay_open_folder"]
+
+[[permission]]
+identifier = "deny-overlay-open-folder"
+description = "Denies the overlay_open_folder command without any pre-configured scope."
+commands.deny = ["overlay_open_folder"]

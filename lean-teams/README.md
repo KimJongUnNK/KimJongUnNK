@@ -95,6 +95,41 @@ sudo bash lean-teams/scripts/measure-macos.sh
 - **Disk:** Gemessen werden App-Bundle plus Benutzerdaten (`~/Library/Containers`, `Group Containers`, `WebKit`, `Caches`).
 - **Fairer Vergleich:** Gleicher Account, gleicher Chat, 2 Minuten warten. Einmal mit sichtbaren Fenstern messen, einmal mit beiden im Hintergrund.
 
+## Overlay & Mods
+
+Lean Teams lässt sich direkt in Teams umgestalten, ohne Neustart.
+
+**Overlay-Menü:** **Strg + Shift + L** (Mac: **⌘ + Shift + L**), der kleine **LT**-Knopf unten links oder Tray → *Overlay-Menü*.
+
+| Im Menü | Wirkung |
+|---|---|
+| Eigene Akzentfarbe | Ersetzt das Teams-Lila über Teams' eigene Design-Variablen. Bei hellen Farben wird der Text darauf automatisch schwarz |
+| Zoom | 50–200 %, alternativ Strg/⌘ + Plus/Minus |
+| Privacy-Blur | Teams wird unscharf, sobald das Fenster nicht im Fokus ist (Screen-Sharing, Schulterblicke) |
+| Immer im Vordergrund | Fenster bleibt über allen anderen |
+| Mods | Jeder Mod im `mods`-Ordner einzeln an/aus |
+| Eigenes CSS | Editor für `custom.css`, wirkt sofort beim Speichern |
+
+**Selbst modden:** Alles liegt als normale Dateien im Einstellungsordner (Knopf *Ordner öffnen*):
+
+```
+config.json      Einstellungen (inkl. "overlay": {...})
+custom.css       dein CSS, auch im Menü editierbar
+mods/            jede .css- und .js-Datei wird geladen (alphabetisch)
+  LIESMICH.txt
+  _beispiel-kompakt.css   <- "_" vorne = aus, umbenennen = an
+  _beispiel-konsole.js
+```
+
+- **Selektoren finden:** Tray → *Entwicklertools* (oder im Menü). Dann mit dem Pfeil-Werkzeug auf ein Element klicken. Nimm `[data-tid="…"]`-Attribute, die generierten Klassennamen von Teams ändern sich mit jedem Update.
+- **CSS-Mods** sind reine Optik.
+- **JS-Mods** laufen mit Teams' Rechten, sehen also deine Chats. Leg nur eigenen oder geprüften Code ab. Jeder Mod läuft isoliert: Ein Fehler in einem Mod stoppt die anderen nicht.
+- **Kein Neustart nötig:** Tray → *Overlay neu laden*. CSS wirkt sofort, bei geänderten JS-Mods lädt Teams kurz neu.
+
+Getestet unter einer Teams-ähnlich strengen Content-Security-Policy mit Trusted Types: Das Menü baut sein DOM ohne `innerHTML` und nutzt Constructable Stylesheets in einem eigenen Shadow-DOM, Teams' CSS kann es also nicht verbiegen.
+
+**Sicherheit:** Die Teams-Seite darf über das Menü nur Overlay-Einstellungen und `custom.css` speichern, vorhandene Mods an- und ausschalten, den Ordner und die Entwicklertools öffnen. JS-Mods anlegen oder ändern kann sie nicht, das geht nur über die Dateien.
+
 ## Einstellungen
 
 Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* öffnet sie. Änderungen greifen nach einem Neustart.
@@ -115,6 +150,7 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 | `extra_browser_args` | `""` | Windows: zusätzliche Chromium-Switches, wörtlich angehängt |
 | `native_notifications` | `true` | Web-Notifications auf OS-Notifications umleiten. `false` = WebView-Verhalten |
 | `close_to_tray` | `true` | `false` = Schließen beendet die App |
+| `overlay` | siehe oben | `accent_color` (`"#RRGGBB"` oder `null`), `zoom`, `privacy_blur`, `custom_css`, `mods`, `always_on_top`, `panel_button`, am einfachsten über das Overlay-Menü |
 
 Kaputtes JSON führt nicht zum Absturz, die App startet dann mit Defaults und schreibt eine Warnung auf stderr.
 
@@ -137,7 +173,7 @@ Das Skript summiert RAM über den **ganzen Prozessbaum** (Host + alle `msedgeweb
 
 ## Sicherheit
 
-Die Teams-Seite ist Remote-Content. Sie bekommt genau **zwei** IPC-Befehle, und zwar nur von den Origins in [`capabilities/teams.json`](src-tauri/capabilities/teams.json) (`teams.microsoft.com`, `teams.cloud.microsoft`, `teams.live.com`):
+Die Teams-Seite ist Remote-Content. Sie bekommt nur wenige IPC-Befehle (die Overlay-Befehle stehen im Abschnitt [Overlay & Mods](#overlay--mods)), und zwar nur von den Origins in [`capabilities/teams.json`](src-tauri/capabilities/teams.json) (`teams.microsoft.com`, `teams.cloud.microsoft`, `teams.live.com`):
 
 - `notify(title, body)`: zeigt eine Notification an (Titel auf 120, Text auf 400 Zeichen gekürzt).
 - `open_link(url)`: öffnet einen Link im Standardbrowser, nur `http(s)`, `mailto`, `tel` und `sip`. Wird nur vom Linux-Link-Shim genutzt.
@@ -158,6 +194,8 @@ lean-teams/
         ├── main.rs              Fenster, Tray, Events, IPC-Befehle
         ├── config.rs            config.json + Chromium-Switches
         ├── policy.rs            Link-Routing + Ungelesen-Parser (pure, getestet)
+        ├── overlay.rs           Akzentfarbe, Blur, custom.css, mods/ (getestet)
+        ├── panel.js             Overlay-Menü in Teams (Shadow-DOM)
         ├── notify.rs            OS-Notifications via notify-rust
         ├── webview2.rs          Windows: Memory-Target + Cache leeren (COM)
         ├── macos.rs             macOS: Cache leeren (WKWebsiteDataStore)

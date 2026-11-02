@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-overlay-devtools"
+description = "Enables the overlay_devtools command without any pre-configured scope."
+commands.allow = ["overlay_devtools"]
+
+[[permission]]
+identifier = "deny-overlay-devtools"
+description = "Denies the overlay_devtools command without any pre-configured scope."
+commands.deny = ["overlay_devtools"]
