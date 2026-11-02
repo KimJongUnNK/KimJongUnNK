@@ -1,4 +1,4 @@
-From 7cf26b80a2ab6dcb5bb1c64fbb7668c2e28c2bac Mon Sep 17 00:00:00 2001
+From 6d766b9676ea1fb1adee211931741f4620925b0c Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 01:22:31 +0000
 Subject: [PATCH] German spelling: compounds, de-AT, and the system language as
@@ -29,11 +29,11 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
 ---
  Cargo.lock                             |   1 +
  crates/engine/Cargo.toml               |   2 +
- crates/engine/src/spell.rs             | 630 +++++++++++++++++++++----
+ crates/engine/src/spell.rs             | 634 +++++++++++++++++++++----
  crates/ui-egui/src/canvas/squiggles.rs |   3 +-
  crates/ui-egui/src/dialogs/language.rs |   6 +-
  crates/ui-egui/src/status.rs           |   7 +-
- 6 files changed, 556 insertions(+), 93 deletions(-)
+ 6 files changed, 560 insertions(+), 93 deletions(-)
 
 diff --git a/Cargo.lock b/Cargo.lock
 index 408e999..95e27b5 100644
@@ -61,7 +61,7 @@ index cb1f4c2..1e05a42 100644
  chrono = { workspace = true }
  
 diff --git a/crates/engine/src/spell.rs b/crates/engine/src/spell.rs
-index 93852e3..1f65f8c 100644
+index 93852e3..e1ec50a 100644
 --- a/crates/engine/src/spell.rs
 +++ b/crates/engine/src/spell.rs
 @@ -3,8 +3,15 @@
@@ -299,13 +299,8 @@ index 93852e3..1f65f8c 100644
 +            for s in rules.iter().filter_map(|&i| self.sfx.get(i)) {
 +                let Some(stem) = strip_end(w, &s.add, &s.strip) else { continue };
 +                if !s.cond_ok(&stem, false) {
-                     continue;
-                 }
--                let Some(stem2) = strip_end(&stem, &s2.add, &s2.strip) else { continue };
--                if s2.cond_ok(&stem2, false) {
--                    let mut need = extra.to_vec();
--                    need.push(s2.flag);
--                    if self.root(&stem2.iter().collect::<String>(), &need, true) {
++                    continue;
++                }
 +                if let Some(hs) = self.words.get(&stem.iter().collect::<String>()) {
 +                    let hit = hs.iter().any(|h| {
 +                        let licensed = match pfx {
@@ -324,8 +319,13 @@ index 93852e3..1f65f8c 100644
 +                    }
 +                }
 +                if pfx.is_some() {
-+                    continue;
-+                }
+                     continue;
+                 }
+-                let Some(stem2) = strip_end(&stem, &s2.add, &s2.strip) else { continue };
+-                if s2.cond_ok(&stem2, false) {
+-                    let mut need = extra.to_vec();
+-                    need.push(s2.flag);
+-                    if self.root(&stem2.iter().collect::<String>(), &need, true) {
 +                // A second suffix whose continuation allows this one (`walk/A` + `ing/B`…).
 +                for s2 in self.sfx_with_cont.get(&s.flag).into_iter().flatten().filter_map(|&i| self.sfx.get(i)) {
 +                    let Some(stem2) = strip_end(&stem, &s2.add, &s2.strip) else { continue };
@@ -536,7 +536,7 @@ index 93852e3..1f65f8c 100644
      } else {
          let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".local/share")));
          out.extend(data.iter().map(|d| d.join("deckcraft/dictionaries")));
-@@ -513,10 +705,53 @@ pub fn search_dirs() -> Vec<PathBuf> {
+@@ -513,10 +705,57 @@ pub fn search_dirs() -> Vec<PathBuf> {
          for d in ["/usr/share/hunspell", "/usr/share/myspell", "/usr/share/myspell/dicts", "/usr/local/share/hunspell", "/app/share/hunspell"] {
              out.push(d.into());
          }
@@ -547,6 +547,10 @@ index 93852e3..1f65f8c 100644
 +    // A `dictionaries` folder beside the program: a portable copy (a zip) can carry its own.
 +    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
 +        out.push(dir.join("dictionaries"));
++        // macOS: inside the app bundle (`DeckCraft.app/Contents/Resources/dictionaries`).
++        if let Some(contents) = dir.parent() {
++            out.push(contents.join("Resources").join("dictionaries"));
++        }
      }
      out
  }
@@ -590,7 +594,7 @@ index 93852e3..1f65f8c 100644
  /// `en-US` → `en_US`; the language alone (`en`) as a fallback.
  fn names(lang: &str) -> (String, String) {
      let full = lang.replace('-', "_");
-@@ -545,6 +780,24 @@ pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
+@@ -545,6 +784,24 @@ pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
              return Some(p);
          }
      }
@@ -615,7 +619,7 @@ index 93852e3..1f65f8c 100644
      for d in dirs {
          if let Some(p) = pair(d, &base) {
              return Some(p);
-@@ -735,7 +988,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
+@@ -735,7 +992,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
          let mut k = a;
          for part in text.split('-') {
              let n = part.chars().count();
@@ -625,7 +629,7 @@ index 93852e3..1f65f8c 100644
                  && let Some(c) = chars.get(k)
              {
                  if p.runs.get(c.1).is_some_and(|r| r.props.no_proof == Some(true)) {
-@@ -957,4 +1212,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
+@@ -957,4 +1216,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
          assert_eq!(stem("fr-FR"), None);
          let _ = std::fs::remove_dir_all(&dir);
      }

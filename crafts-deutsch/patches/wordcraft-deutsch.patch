@@ -1,4 +1,4 @@
-From 6209e35762f5fcd4abdc6653e3fe7fd049ae4f67 Mon Sep 17 00:00:00 2001
+From afd29d33bf6ce8b9dc6491c13356069da062418c Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 01:11:00 +0000
 Subject: [PATCH] German spelling: de-DE, de-AT, de-CH with Hunspell
@@ -32,7 +32,7 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
  crates/proof/src/de/grammar.rs                |  99 ++++
  crates/proof/src/de/mod.rs                    | 342 ++++++++++++
  crates/proof/src/de/test_dict.rs              |  83 +++
- crates/proof/src/hunspell.rs                  |   9 +-
+ crates/proof/src/hunspell.rs                  |  13 +-
  crates/proof/src/hyphen.rs                    |   2 +-
  crates/proof/src/lang.rs                      |  49 +-
  crates/proof/src/lib.rs                       |  56 +-
@@ -40,7 +40,7 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
  .../src/dialogs/dialogs_layout/text.rs        |   4 +-
  crates/ui-egui/src/i18n.rs                    |   3 +-
  crates/ui-egui/src/options.rs                 |  13 +-
- 14 files changed, 1150 insertions(+), 50 deletions(-)
+ 14 files changed, 1154 insertions(+), 50 deletions(-)
  create mode 100644 crates/proof/src/de/grammar.rs
  create mode 100644 crates/proof/src/de/mod.rs
  create mode 100644 crates/proof/src/de/test_dict.rs
@@ -1280,7 +1280,7 @@ index 0000000..b11ca9d
 +    AffixDict::from_hunspell(AFF, DIC, &["synthetic German test data"]).unwrap_or_default()
 +}
 diff --git a/crates/proof/src/hunspell.rs b/crates/proof/src/hunspell.rs
-index 1afd903..127e6e7 100644
+index 1afd903..6e010bf 100644
 --- a/crates/proof/src/hunspell.rs
 +++ b/crates/proof/src/hunspell.rs
 @@ -6,8 +6,9 @@
@@ -1295,13 +1295,17 @@ index 1afd903..127e6e7 100644
  
  use std::path::{Path, PathBuf};
  use std::sync::RwLock;
-@@ -76,6 +77,10 @@ pub fn search_dirs(lo_exts: Option<&[String]>) -> Vec<PathBuf> {
+@@ -76,6 +77,14 @@ pub fn search_dirs(lo_exts: Option<&[String]>) -> Vec<PathBuf> {
      if let Some(d) = std::env::var_os("WORDCRAFT_DICTIONARIES").filter(|v| !v.is_empty()) {
          dirs.push(PathBuf::from(d));
      }
 +    // A `dictionaries` folder beside the program: a portable copy (a zip) can carry its own.
 +    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
 +        dirs.push(dir.join("dictionaries"));
++        // macOS: inside the app bundle (`WordCraft.app/Contents/Resources/dictionaries`).
++        if let Some(contents) = dir.parent() {
++            dirs.push(contents.join("Resources").join("dictionaries"));
++        }
 +    }
      // LibreOffice keeps each language under `…/share/extensions/<dict-xx>`.
      let lo_dirs =
