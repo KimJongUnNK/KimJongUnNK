@@ -1,0 +1,1653 @@
+From 6209e35762f5fcd4abdc6653e3fe7fd049ae4f67 Mon Sep 17 00:00:00 2001
+From: Emil Boenke <boenkeemil@gmail.com>
+Date: Mon, 2 Nov 2026 01:11:00 +0000
+Subject: [PATCH] German spelling: de-DE, de-AT, de-CH with Hunspell
+ compounding
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+German was hyphenated but never spell-checked, so German text was flagged
+against the US English word list.
+
+- affix engine: Hunspell compounding (COMPOUNDFLAG, COMPOUNDBEGIN/MIDDLE/END,
+  COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG, ONLYINCOMPOUND, COMPOUNDMIN,
+  COMPOUNDWORDMAX), NEEDAFFIX/PSEUDOROOT, CIRCUMFIX, CHECKSHARPS; homonyms kept
+  apart in compounding dictionaries; flags named only in continuation classes
+  count; MAP groups with multi-letter items become REP pairs.
+- new `de` proofing module: Germany, Austria, Switzerland, each reading its own
+  installed Hunspell dictionary (LibreOffice `*_frami` too), German messages,
+  umlaut/ß suggestions, German repeated-word and spacing checks.
+- new documents follow the region's German (German interface, or English
+  interface on a German-speaking system): de-AT on an Austrian Windows.
+- dictionaries are also looked up in a `dictionaries` folder beside the program.
+- Language dialog and region list offer German (Austria) and (Switzerland).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ crates/engine/src/session/query.rs            |  12 +
+ crates/engine/src/tests.rs                    |  26 +
+ crates/proof/src/affix.rs                     | 495 +++++++++++++++++-
+ crates/proof/src/de/grammar.rs                |  99 ++++
+ crates/proof/src/de/mod.rs                    | 342 ++++++++++++
+ crates/proof/src/de/test_dict.rs              |  83 +++
+ crates/proof/src/hunspell.rs                  |   9 +-
+ crates/proof/src/hyphen.rs                    |   2 +-
+ crates/proof/src/lang.rs                      |  49 +-
+ crates/proof/src/lib.rs                       |  56 +-
+ crates/ui-egui/src/app.rs                     |   7 +-
+ .../src/dialogs/dialogs_layout/text.rs        |   4 +-
+ crates/ui-egui/src/i18n.rs                    |   3 +-
+ crates/ui-egui/src/options.rs                 |  13 +-
+ 14 files changed, 1150 insertions(+), 50 deletions(-)
+ create mode 100644 crates/proof/src/de/grammar.rs
+ create mode 100644 crates/proof/src/de/mod.rs
+ create mode 100644 crates/proof/src/de/test_dict.rs
+
+diff --git a/crates/engine/src/session/query.rs b/crates/engine/src/session/query.rs
+index fbefe1c..fabc0ad 100644
+--- a/crates/engine/src/session/query.rs
++++ b/crates/engine/src/session/query.rs
+@@ -191,6 +191,18 @@ impl Session {
+             .unwrap_or_else(|| "es-ES".into())
+     }
+ 
++    /// The German of the region in effect (`de-AT` on an Austrian system, `de-CH` on a Swiss
++    /// one, `de-DE` for German without a territory; ISO 639-2 `deu`/`ger` count as German), or
++    /// `None` when the region's language isn't German. A German interface, and an English one on
++    /// a German-speaking system, write new documents in it, so German text is proofed in German
++    /// from the first word instead of as US English.
++    pub fn region_german(&self) -> Option<String> {
++        let r = self.region();
++        matches!(r.language.as_str(), "de" | "deu" | "ger")
++            .then(|| format!("de-{}", if r.territory.is_empty() { "DE" } else { r.territory.as_str() }))
++            .and_then(|t| wordcraft_proof::lang::normalize_tag(&t))
++    }
++
+     /// The unit rulers and dialogs show lengths in: the user's choice, else the region's.
+     pub fn units(&self) -> wordcraft_geom::Unit {
+         self.prefs.units.unwrap_or_else(|| self.region().units())
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index 506033c..676d0df 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -8764,6 +8764,32 @@ fn new_documents_follow_the_regions_spanish() {
+     }
+ }
+ 
++/// A German interface, or an English one on a German-speaking system, writes new documents in
++/// the region's German: Austria's on an Austrian system, Switzerland's on a Swiss one.
++#[test]
++fn new_documents_follow_the_regions_german() {
++    let mut s = s();
++    s.system_region = wordcraft_geom::Region::from_tag("de_AT.UTF-8");
++    assert_eq!(s.region_german().as_deref(), Some("de-AT"));
++    s.set_editing_language(s.region_german().as_deref());
++    assert_eq!(s.doc.styles.default_chr.lang.as_deref(), Some("de-AT"), "the untouched document follows");
++    assert_eq!(wordcraft_proof::ProofLang::from_tag(s.doc.styles.default_chr.lang.as_deref()), wordcraft_proof::ProofLang::DeAt);
++    for (tag, german) in [
++        ("de-CH", Some("de-CH")),
++        ("de-DE", Some("de-DE")),
++        ("deu-LI", Some("de-LI")),
++        ("de", Some("de-DE")),
++        ("en-US", None),
++        ("fr-FR", None),
++        ("auto", Some("de-AT")),
++    ] {
++        run(&mut s, "file.options", json!({"region": tag}));
++        assert_eq!(s.region_german().as_deref(), german, "{tag}");
++    }
++    s.system_region = wordcraft_geom::Region::from_tag("en_GB.UTF-8");
++    assert_eq!(s.region_german(), None);
++}
++
+ // Hand-written synthetic fixtures (no system dictionary data): Spain's has `vosotros` forms,
+ // Uruguay's has `vos` ones' verbs only (the forms come from the voseo rules).
+ const SPANISH_TEST_AFF: &str =
+diff --git a/crates/proof/src/affix.rs b/crates/proof/src/affix.rs
+index cb46212..b244c01 100644
+--- a/crates/proof/src/affix.rs
++++ b/crates/proof/src/affix.rs
+@@ -18,8 +18,17 @@
+ //! stem is a word only in its own letter case), input conversion (`ICONV`: ligatures such as `ﬁ`
+ //! read as `fi`) and ignored characters (`IGNORE`), and the suggestion tables `TRY`, `KEY`, `MAP`
+ //! and `REP`.
+-//! Morphological data (`AM` aliases, the fields after a stem) is skipped. Rejected: compounding,
+-//! long or numeric flags, `NEEDAFFIX` and the other directives that change which words are correct.
++//!
++//! Compounding as German and Dutch dictionaries use it (#de): `COMPOUNDFLAG`,
++//! `COMPOUNDBEGIN`/`COMPOUNDMIDDLE`/`COMPOUNDEND` (and the older `COMPOUNDFIRST`/`COMPOUNDLAST`),
++//! `COMPOUNDPERMITFLAG`, `COMPOUNDFORBIDFLAG`, `ONLYINCOMPOUND`, `COMPOUNDMIN`, `COMPOUNDWORDMAX`,
++//! with `NEEDAFFIX` (`PSEUDOROOT`), `CIRCUMFIX` and `CHECKSHARPS` (`STRASSE` for `Straße`). A
++//! compound is checked part by part as Hunspell does: the first part needs the begin flag (on its
++//! stem or on an affix's continuation classes), every inner part the middle flag and the last one
++//! the end flag; suffixes inside a compound and prefixes on its last part need the permit flag.
++//! `MAP` groups with multi-letter items (`(ss)ß`, `(ue)ü`) become `REP` pairs for suggestions.
++//! Morphological data (`AM` aliases, the fields after a stem) is skipped. Rejected: `COMPOUNDRULE`,
++//! long or numeric flags and the other directives that change which words are correct.
+ //!
+ //! Lookups never panic: stems sit in one string, found through an open-addressing hash table, and
+ //! a probe allocates only small scratch strings for the candidate roots it tries.
+@@ -36,25 +45,23 @@ pub const MAX_WORD_BYTES: usize = 120;
+ const EMPTY: u32 = u32::MAX;
+ 
+ /// Directives that change which words are correct in ways this engine doesn't implement.
+-const UNSUPPORTED: &[&str] = &[
+-    "CHECKSHARPS",
+-    "CIRCUMFIX",
+-    "COMPLEXPREFIXES",
+-    "COMPOUNDBEGIN",
+-    "COMPOUNDEND",
+-    "COMPOUNDFIRST",
+-    "COMPOUNDFLAG",
+-    "COMPOUNDLAST",
+-    "COMPOUNDMIDDLE",
+-    "COMPOUNDMIN",
+-    "COMPOUNDPERMITFLAG",
+-    "COMPOUNDRULE",
+-    "FULLSTRIP",
+-    "NEEDAFFIX",
+-    "OCONV",
+-    "ONLYINCOMPOUND",
+-    "PSEUDOROOT",
+-];
++const UNSUPPORTED: &[&str] = &["COMPLEXPREFIXES", "COMPOUNDRULE", "FULLSTRIP", "OCONV"];
++
++/// Hunspell's default `COMPOUNDMIN`: compound parts have at least three letters.
++const DEFAULT_COMPOUND_MIN: usize = 3;
++/// Most parts a compound is split into when the dictionary sets no `COMPOUNDWORDMAX`: German
++/// compounds of more than eight parts don't occur in text, and the bound caps the work.
++const DEFAULT_COMPOUND_MAX: usize = 8;
++/// Most `ß` spellings tried for the `SS` of a word in capitals (`CHECKSHARPS`): 2^5.
++const MAX_SHARP_S: usize = 5;
++
++/// Where a part sits in a compound.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum Part {
++    Begin,
++    Middle,
++    End,
++}
+ 
+ /// Most distinct flags a dictionary may use: every single-byte flag (the Hungarian dictionary
+ /// uses 158).
+@@ -270,6 +277,93 @@ pub struct AffixDict {
+     ignore: Box<[char]>,
+     /// Provenance and licence lines, kept through [`AffixDict::to_bytes`].
+     comments: Vec<String>,
++    /// Compounding and the directives that go with it (see the module docs).
++    cpd: Compounding,
++}
++
++/// The compounding flags of a dictionary as bits, and its limits.
++#[derive(Clone, Copy, Debug, Default)]
++struct Compounding {
++    flag: Mask,
++    begin: Mask,
++    middle: Mask,
++    end: Mask,
++    permit: Mask,
++    forbid: Mask,
++    only_in_compound: Mask,
++    need_affix: Mask,
++    circumfix: Mask,
++    /// Fewest letters of a part.
++    min: usize,
++    /// Most parts of a compound.
++    max_parts: usize,
++    /// `CHECKSHARPS`: `SS` in a word in capitals may stand for `ß`.
++    check_sharps: bool,
++}
++
++impl Compounding {
++    /// Does the dictionary build compounds at all?
++    fn compounds(&self) -> bool {
++        !(self.flag | self.begin | self.middle | self.end).is_empty()
++    }
++
++    /// Do words need more than the plain stem-and-affix check (compound-only stems and affixes,
++    /// stems that need an affix, circumfixes)?
++    fn advanced(&self) -> bool {
++        self.compounds() || !(self.only_in_compound | self.need_affix | self.circumfix).is_empty()
++    }
++}
++
++/// One way a word is built: a stem's flags with at most one prefix and two suffixes (`sfx` the
++/// outer one, `sfx2` the one applied to the stem first).
++#[derive(Clone, Copy)]
++struct Analysis<'a> {
++    root: Mask,
++    pfx: Option<&'a Rule>,
++    sfx: Option<&'a Rule>,
++    sfx2: Option<&'a Rule>,
++}
++
++impl Analysis<'_> {
++    fn affixes(&self) -> impl Iterator<Item = &Rule> {
++        [self.pfx, self.sfx, self.sfx2].into_iter().flatten()
++    }
++
++    fn suffixes(&self) -> impl Iterator<Item = &Rule> {
++        [self.sfx, self.sfx2].into_iter().flatten()
++    }
++
++    /// The continuation classes of all its affixes.
++    fn conts(&self) -> Mask {
++        self.affixes().fold(Mask::EMPTY, |m, r| m | r.cont)
++    }
++}
++
++/// The spellings of `lower` (a word in capitals, lowered) with `ss` read as `ß` at some of its
++/// first [`MAX_SHARP_S`] places, each at least once.
++fn sharp_s_spellings(lower: &str) -> Vec<String> {
++    let at: Vec<usize> = lower.match_indices("ss").map(|(i, _)| i).take(MAX_SHARP_S).collect();
++    let mut out = Vec::new();
++    for pick in 1u32..(1u32 << at.len()) {
++        let mut v = String::with_capacity(lower.len());
++        let mut last = 0;
++        let mut prev_end = 0;
++        for (k, &i) in at.iter().enumerate() {
++            // Overlapping places (`sss`): a later one inside a picked one is skipped.
++            if pick & (1 << k) == 0 || i < prev_end {
++                continue;
++            }
++            v.push_str(lower.get(last..i).unwrap_or_default());
++            v.push('ß');
++            last = i + 2;
++            prev_end = last;
++        }
++        v.push_str(lower.get(last..).unwrap_or_default());
++        if !out.contains(&v) {
++            out.push(v);
++        }
++    }
++    out
+ }
+ 
+ fn hash_str(s: &str) -> u64 {
+@@ -339,6 +433,11 @@ struct Rules {
+     substandard: Option<char>,
+     /// The `KEEPCASE` flag.
+     keepcase: Option<char>,
++    /// Compounding directives by name (`COMPOUNDBEGIN` → `x`), and the numeric ones.
++    cpd_flags: Vec<(&'static str, char)>,
++    compound_min: Option<usize>,
++    compound_max: Option<usize>,
++    check_sharps: bool,
+     iconv: Vec<(String, String)>,
+     ignore: Vec<char>,
+     /// `AF` flag aliases: alias `n` (1-based) stands for `aliases[n - 1]`.
+@@ -422,6 +521,43 @@ fn zero_empty(s: &str) -> String {
+ /// but it is not a flag of its own: it is dropped wherever flags are read.
+ const EMOJI_SELECTOR: char = '\u{fe0f}';
+ 
++/// The canonical name of a compounding directive whose argument is one flag (`COMPOUNDFIRST` is
++/// `COMPOUNDBEGIN`, `PSEUDOROOT` is `NEEDAFFIX`), or `None` for any other directive.
++fn compound_directive(d: &str) -> Option<&'static str> {
++    Some(match d {
++        "COMPOUNDFLAG" => "COMPOUNDFLAG",
++        "COMPOUNDBEGIN" | "COMPOUNDFIRST" => "COMPOUNDBEGIN",
++        "COMPOUNDMIDDLE" => "COMPOUNDMIDDLE",
++        "COMPOUNDEND" | "COMPOUNDLAST" => "COMPOUNDEND",
++        "COMPOUNDPERMITFLAG" => "COMPOUNDPERMITFLAG",
++        "COMPOUNDFORBIDFLAG" => "COMPOUNDFORBIDFLAG",
++        "ONLYINCOMPOUND" => "ONLYINCOMPOUND",
++        "NEEDAFFIX" | "PSEUDOROOT" => "NEEDAFFIX",
++        "CIRCUMFIX" => "CIRCUMFIX",
++        _ => return None,
++    })
++}
++
++/// The items of a `MAP` line: single letters, or the letters of a `(…)` group as one item.
++fn map_items(text: &str) -> Vec<String> {
++    let mut out = Vec::new();
++    let mut group: Option<String> = None;
++    for c in text.chars() {
++        match (c, group.as_mut()) {
++            ('(', None) => group = Some(String::new()),
++            (')', Some(_)) => {
++                if let Some(g) = group.take().filter(|g| !g.is_empty()) {
++                    out.push(g);
++                }
++            }
++            (c, Some(g)) => g.push(c),
++            (c, None) => out.push(c.to_string()),
++        }
++    }
++    out.dedup();
++    out
++}
++
+ /// Read Hunspell `.aff` text (already decoded to UTF-8).
+ fn parse_aff(aff: &str) -> Result<Rules, String> {
+     let mut r = Rules::default();
+@@ -464,6 +600,16 @@ fn parse_aff(aff: &str) -> Result<Rules, String> {
+             }
+             "IGNORE" => r.ignore = at(1).chars().collect(),
+             "KEEPCASE" => r.keepcase = Some(one_flag(at(1), dir, n)?),
++            d if compound_directive(d).is_some() => {
++                if let Some(name) = compound_directive(d) {
++                    let c = one_flag(at(1), dir, n)?;
++                    r.cpd_flags.retain(|(k, _)| *k != name);
++                    r.cpd_flags.push((name, c));
++                }
++            }
++            "COMPOUNDMIN" => r.compound_min = at(1).parse::<usize>().ok().map(|m| m.clamp(1, 64)),
++            "COMPOUNDWORDMAX" => r.compound_max = at(1).parse::<usize>().ok().map(|m| m.clamp(2, 16)),
++            "CHECKSHARPS" => r.check_sharps = true,
+             // Per-character flag modes (`FLAG UTF-8`, as VERO's pt_BR dictionary uses) work
+             // with the one-character parsing here; only the multi-character encodings differ.
+             "FLAG" if !matches!(at(1), "UTF-8" | "DEFAULT" | "utf-8" | "default" | "UTF8" | "") => {
+@@ -479,6 +625,16 @@ fn parse_aff(aff: &str) -> Result<Rules, String> {
+                     map_header = true;
+                 } else if !at(1).contains('(') {
+                     r.map.push(at(1).chars().collect());
++                } else {
++                    // `(ss)ß`: multi-letter items can't join a letter group; each pair becomes a
++                    // REP confusion both ways (`Strasse` → `Straße`).
++                    let items = map_items(at(1));
++                    for (i, a) in items.iter().enumerate() {
++                        for b in items.iter().skip(i + 1) {
++                            r.rep.push((a.clone(), b.clone()));
++                            r.rep.push((b.clone(), a.clone()));
++                        }
++                    }
+                 }
+             }
+             "REP" => {
+@@ -591,6 +747,10 @@ impl AffixDict {
+         // Flags: every one a rule or a stem uses gets a bit.
+         let mut flag_chars: Vec<char> = rules.prefixes.iter().chain(&rules.suffixes).map(|r| r.0).collect();
+         flag_chars.extend(stems.iter().flat_map(|s| s.1.chars()));
++        // Flags that only continuation classes and compounding directives name (`COMPOUNDBEGIN x`
++        // on `SFX j 0 0/xoc`) are flags too.
++        flag_chars.extend(rules.prefixes.iter().chain(&rules.suffixes).flat_map(|r| r.4.chars()));
++        flag_chars.extend(rules.cpd_flags.iter().map(|&(_, c)| c));
+         flag_chars.sort_unstable();
+         flag_chars.dedup();
+         if flag_chars.len() > MAX_FLAGS {
+@@ -599,6 +759,21 @@ impl AffixDict {
+         let bit_of = |c: char| flag_chars.iter().position(|&x| x == c).map_or(Mask::EMPTY, Mask::bit);
+         let forbidden = rules.forbidden.map_or(Mask::EMPTY, bit_of);
+         let keepcase = rules.keepcase.map_or(Mask::EMPTY, bit_of);
++        let cpd_bit = |name: &str| rules.cpd_flags.iter().find(|(k, _)| *k == name).map_or(Mask::EMPTY, |&(_, c)| bit_of(c));
++        let cpd = Compounding {
++            flag: cpd_bit("COMPOUNDFLAG"),
++            begin: cpd_bit("COMPOUNDBEGIN"),
++            middle: cpd_bit("COMPOUNDMIDDLE"),
++            end: cpd_bit("COMPOUNDEND"),
++            permit: cpd_bit("COMPOUNDPERMITFLAG"),
++            forbid: cpd_bit("COMPOUNDFORBIDFLAG"),
++            only_in_compound: cpd_bit("ONLYINCOMPOUND"),
++            need_affix: cpd_bit("NEEDAFFIX"),
++            circumfix: cpd_bit("CIRCUMFIX"),
++            min: rules.compound_min.unwrap_or(DEFAULT_COMPOUND_MIN),
++            max_parts: rules.compound_max.unwrap_or(DEFAULT_COMPOUND_MAX),
++            check_sharps: rules.check_sharps,
++        };
+         // Stems sorted by bytes; homonyms (the same word twice) are merged.
+         stems.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+         let mut d = AffixDict {
+@@ -616,9 +791,15 @@ impl AffixDict {
+             map: rules.map,
+             rep: rules.rep,
+             comments,
++            cpd,
+             ..AffixDict::default()
+         };
+         d.offs.push(0);
++        // Homonyms (`tür/EPMozm`, `tür/hke`) are merged into one stem, unless the dictionary
++        // compounds or needs affixes: there one homonym may be a compound part only and another a
++        // word, so each keeps its own flags.
++        let merge = !cpd.advanced();
++        stems.dedup();
+         let mut set_ids: HashMap<Mask, u16> = HashMap::new();
+         let mut i = 0;
+         while i < stems.len() {
+@@ -627,6 +808,7 @@ impl AffixDict {
+             let mut j = i;
+             while let Some((w, f)) = stems.get(j)
+                 && w == word
++                && (merge || j == i)
+             {
+                 mask |= f.chars().map(bit_of).fold(Mask::EMPTY, |a, b| a | b);
+                 j += 1;
+@@ -768,6 +950,15 @@ impl AffixDict {
+                 return None;
+             }
+             if self.word(t as usize) == Some(w) {
++                if self.cpd.advanced() {
++                    // Homonyms are kept apart there: every one that counts.
++                    let mut all = None;
++                    self.each_homonym_at(t as usize, w, deny, &mut |m| {
++                        all = Some(all.unwrap_or(Mask::EMPTY) | m);
++                        false
++                    });
++                    return all;
++                }
+                 let id = *self.flags.get(t as usize)?;
+                 let mask = self.sets.get(usize::from(id)).copied();
+                 // A stem carrying FORBIDDENWORD is listed but is not a word: no direct hit,
+@@ -779,6 +970,49 @@ impl AffixDict {
+         None
+     }
+ 
++    /// The index of a stem spelled `w` (any of its homonyms), if there is one.
++    fn stem_index(&self, w: &str) -> Option<usize> {
++        if self.table.is_empty() {
++            return None;
++        }
++        let mask = self.table.len() - 1;
++        let mut slot = hash_str(w) as usize & mask;
++        for _ in 0..self.table.len() {
++            let t = *self.table.get(slot)?;
++            if t == EMPTY {
++                return None;
++            }
++            if self.word(t as usize) == Some(w) {
++                return Some(t as usize);
++            }
++            slot = (slot + 1) & mask;
++        }
++        None
++    }
++
++    /// Call `f` with the flags of each homonym spelled `w` (forbidden ones and those carrying a
++    /// flag of `deny` left out) until it returns true.
++    fn each_homonym(&self, w: &str, deny: Mask, f: &mut dyn FnMut(Mask) -> bool) -> bool {
++        self.stem_index(w).is_some_and(|t| self.each_homonym_at(t, w, deny, f))
++    }
++
++    /// [`AffixDict::each_homonym`] from one of them, `t`: they sit next to each other.
++    fn each_homonym_at(&self, t: usize, w: &str, deny: Mask, f: &mut dyn FnMut(Mask) -> bool) -> bool {
++        let mut first = t;
++        while first > 0 && self.word(first - 1) == Some(w) {
++            first -= 1;
++        }
++        let mut i = first;
++        while self.word(i) == Some(w) {
++            let m = self.flags.get(i).and_then(|&id| self.sets.get(usize::from(id))).copied().unwrap_or_default();
++            if !m.meets(self.forbidden | deny) && f(m) {
++                return true;
++            }
++            i += 1;
++        }
++        false
++    }
++
+     /// Does `w` carry any flag of `flags` — as a stem, or as the form of a suffix rule whose
+     /// continuation classes include one (chained suffixation, depth-bounded)?
+     ///
+@@ -863,6 +1097,9 @@ impl AffixDict {
+         if w.is_empty() || w.len() > MAX_WORD_BYTES {
+             return false;
+         }
++        if self.cpd.advanced() {
++            return self.analyze(w, deny, &mut |a| self.affixes_ok(&a, false)) || self.compound(w, deny);
++        }
+         if self.stem_flags_except(w, deny).is_some() || self.suffixed(w, Mask::EMPTY, deny) {
+             return true;
+         }
+@@ -958,11 +1195,190 @@ impl AffixDict {
+             Casing::Initial => self.contains_except(&w.to_lowercase(), deny),
+             Casing::Upper => {
+                 let lower = w.to_lowercase();
+-                self.contains_except(&capitalize(&lower), deny) || self.contains_except(&lower, deny)
++                if self.contains_except(&capitalize(&lower), deny) || self.contains_except(&lower, deny) {
++                    return true;
++                }
++                // CHECKSHARPS: `STRASSE` is `Straße` in capitals, `MASSE` both `Masse` and `Maße`.
++                self.cpd.check_sharps
++                    && sharp_s_spellings(&lower).iter().any(|v| self.contains_except(&capitalize(v), deny) || self.contains_except(v, deny))
+             }
+         }
+     }
+ 
++    /// Every analysis of `w` (stem, prefix, up to two suffixes, a prefix with a suffix), until `f`
++    /// accepts one. Stems carrying a flag in `deny` (and forbidden ones) don't count.
++    fn analyze<'a>(&'a self, w: &str, deny: Mask, f: &mut dyn FnMut(Analysis<'a>) -> bool) -> bool {
++        if w.is_empty() || w.len() > MAX_WORD_BYTES {
++            return false;
++        }
++        if self.each_homonym(w, deny, &mut |root| f(Analysis { root, pfx: None, sfx: None, sfx2: None })) {
++            return true;
++        }
++        if self.analyze_suffixed(w, deny, None, f) {
++            return true;
++        }
++        let mut root = String::with_capacity(w.len() + 8);
++        for p in &self.prefixes {
++            let Some(rest) = w.strip_prefix(&*p.add) else { continue };
++            if rest.is_empty() {
++                continue;
++            }
++            root.clear();
++            root.push_str(&p.strip);
++            root.push_str(rest);
++            if !p.cond_matches(&root, false) {
++                continue;
++            }
++            if self.each_homonym(&root, deny, &mut |r| r.meets(p.bit) && f(Analysis { root: r, pfx: Some(p), sfx: None, sfx2: None })) {
++                return true;
++            }
++            if self.analyze_suffixed(&root, deny, Some(p), f) {
++                return true;
++            }
++        }
++        false
++    }
++
++    /// The analyses of `w` as a stem with one suffix, or two in a row (continuation classes);
++    /// with a prefix `pfx` taken off already, one suffix that combines with it.
++    fn analyze_suffixed<'a>(&'a self, w: &str, deny: Mask, pfx: Option<&'a Rule>, f: &mut dyn FnMut(Analysis<'a>) -> bool) -> bool {
++        let cuts = |w: &str| std::iter::once(w.len()).chain(w.char_indices().rev().map(|(i, _)| i).filter(|&i| i > 0)).collect::<Vec<_>>();
++        let mut root = String::with_capacity(w.len() + 8);
++        for b in cuts(w).into_iter().take(self.max_sfx_chars + 1) {
++            let (Some(base), Some(add)) = (w.get(..b), w.get(b..)) else { continue };
++            let Some(groups) = self.sfx_index.get(add) else { continue };
++            for g in groups {
++                root.clear();
++                root.push_str(base);
++                root.push_str(&g.strip);
++                let stem_t = self.stem_index(&root);
++                for r in g.rules.iter().filter_map(|&i| self.suffixes.get(i as usize)) {
++                    if !r.cond_matches(&root, true) {
++                        continue;
++                    }
++                    if let Some(t) = stem_t {
++                        let hit = self.each_homonym_at(t, &root, deny, &mut |s| {
++                            let licensed = match pfx {
++                                None => s.meets(r.bit),
++                                // A cross product, or the suffix's classes allow the prefix, or
++                                // the prefix's allow the suffix.
++                                Some(p) => (s.meets(r.bit) || p.cont.meets(r.bit)) && ((s.meets(p.bit) && p.cross && r.cross) || r.cont.meets(p.bit)),
++                            };
++                            licensed && f(Analysis { root: s, pfx, sfx: Some(r), sfx2: None })
++                        });
++                        if hit {
++                            return true;
++                        }
++                    }
++                    if pfx.is_some() {
++                        continue;
++                    }
++                    // Two suffixes: `root` is itself a stem with a suffix whose classes hold `r`'s flag.
++                    let mut inner = String::with_capacity(root.len() + 8);
++                    for b2 in cuts(&root).into_iter().take(self.max_sfx_chars + 1) {
++                        let (Some(base2), Some(add2)) = (root.get(..b2), root.get(b2..)) else { continue };
++                        let Some(groups2) = self.sfx_index.get(add2) else { continue };
++                        for g2 in groups2 {
++                            inner.clear();
++                            inner.push_str(base2);
++                            inner.push_str(&g2.strip);
++                            for r2 in g2.rules.iter().filter_map(|&i| self.suffixes.get(i as usize)) {
++                                if r2.cont.meets(r.bit)
++                                    && r2.cond_matches(&inner, true)
++                                    && self.each_homonym(&inner, deny, &mut |s2| {
++                                        s2.meets(r2.bit) && f(Analysis { root: s2, pfx: None, sfx: Some(r), sfx2: Some(r2) })
++                                    })
++                                {
++                                    return true;
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++        }
++        false
++    }
++
++    /// May the affixes of `a` stand as they are: `NEEDAFFIX` stems have an affix that needs no
++    /// other, circumfixes come in pairs, and outside a compound nothing is `ONLYINCOMPOUND`.
++    fn affixes_ok(&self, a: &Analysis<'_>, in_compound: bool) -> bool {
++        let c = &self.cpd;
++        if !c.need_affix.is_empty() {
++            let mut affixes = a.affixes().peekable();
++            let affixed = affixes.peek().is_some();
++            let all_need = affixed && a.affixes().all(|r| r.cont.meets(c.need_affix));
++            if (a.root.meets(c.need_affix) && !affixed) || all_need {
++                return false;
++            }
++        }
++        if !c.circumfix.is_empty() {
++            let pfx = a.pfx.is_some_and(|r| r.cont.meets(c.circumfix));
++            let sfx = a.suffixes().any(|r| r.cont.meets(c.circumfix));
++            if pfx != sfx {
++                return false;
++            }
++        }
++        in_compound || !(a.root | a.conts()).meets(c.only_in_compound)
++    }
++
++    /// Can `part` be the part of a compound at `at`?
++    fn part_ok(&self, part: &str, at: Part, deny: Mask) -> bool {
++        let c = &self.cpd;
++        if part.chars().count() < c.min {
++            return false;
++        }
++        let need = c.flag
++            | match at {
++                Part::Begin => c.begin,
++                Part::Middle => c.middle,
++                Part::End => c.end,
++            };
++        if need.is_empty() {
++            return false;
++        }
++        self.analyze(part, deny, &mut |a| {
++            let conts = a.conts();
++            (a.root | conts).meets(need)
++                && !conts.meets(c.forbid)
++                // Suffixes may end a compound, prefixes begin one; elsewhere they need the permit flag.
++                && match at {
++                    Part::Begin | Part::Middle => a.suffixes().all(|r| r.cont.meets(c.permit)),
++                    Part::End => a.pfx.is_none_or(|r| r.cont.meets(c.permit)),
++                }
++                && self.affixes_ok(&a, true)
++        })
++    }
++
++    /// Is `w` a compound of dictionary parts (see the module docs)? Each tail is worked out once,
++    /// so a word costs at most a few hundred part lookups.
++    fn compound(&self, w: &str, deny: Mask) -> bool {
++        if !self.cpd.compounds() || w.chars().count() < 2 * self.cpd.min {
++            return false;
++        }
++        let bounds: Vec<usize> = w.char_indices().map(|(i, _)| i).filter(|&i| i > 0).collect();
++        let mut tails: HashMap<usize, bool> = HashMap::new();
++        bounds
++            .iter()
++            .any(|&j| w.get(..j).is_some_and(|head| self.part_ok(head, Part::Begin, deny)) && self.compound_tail(w, j, &bounds, 2, deny, &mut tails))
++    }
++
++    /// Is `w[from..]` the rest of a compound: an end part, or a middle part and a rest?
++    fn compound_tail(&self, w: &str, from: usize, bounds: &[usize], parts: usize, deny: Mask, tails: &mut HashMap<usize, bool>) -> bool {
++        if let Some(&known) = tails.get(&from) {
++            return known;
++        }
++        let Some(rest) = w.get(from..) else { return false };
++        let mut ok = self.part_ok(rest, Part::End, deny);
++        if !ok && parts < self.cpd.max_parts {
++            ok = bounds.iter().filter(|&&j| j > from).any(|&j| {
++                w.get(from..j).is_some_and(|mid| self.part_ok(mid, Part::Middle, deny)) && self.compound_tail(w, j, bounds, parts + 1, deny, tails)
++            });
++        }
++        tails.insert(from, ok);
++        ok
++    }
++
+     /// Every form of the stem `stem` (itself included), unsorted, possibly with repeats; at most
+     /// [`MAX_FORMS`], and at most [`MAX_FORMS_WORK`] rules tried along the continuation chains and
+     /// cross products, so a dictionary with thousands of self-continuing rules can't make one stem
+@@ -1120,6 +1536,30 @@ impl AffixDict {
+                 out.push_str(&format!("{directive} {c}\n"));
+             }
+         }
++        let c = &self.cpd;
++        for (directive, mask) in [
++            ("COMPOUNDFLAG", c.flag),
++            ("COMPOUNDBEGIN", c.begin),
++            ("COMPOUNDMIDDLE", c.middle),
++            ("COMPOUNDEND", c.end),
++            ("COMPOUNDPERMITFLAG", c.permit),
++            ("COMPOUNDFORBIDFLAG", c.forbid),
++            ("ONLYINCOMPOUND", c.only_in_compound),
++            ("NEEDAFFIX", c.need_affix),
++            ("CIRCUMFIX", c.circumfix),
++        ] {
++            if !mask.is_empty()
++                && let Some(ch) = self.flag_char(mask)
++            {
++                out.push_str(&format!("{directive} {ch}\n"));
++            }
++        }
++        if c.compounds() {
++            out.push_str(&format!("COMPOUNDMIN {}\nCOMPOUNDWORDMAX {}\n", c.min, c.max_parts));
++        }
++        if c.check_sharps {
++            out.push_str("CHECKSHARPS\n");
++        }
+         for (a, b) in &self.iconv {
+             out.push_str(&format!("ICONV {a} {b}\n"));
+         }
+@@ -1191,6 +1631,15 @@ impl AffixDict {
+                         _ => rules.keepcase = Some(c),
+                     }
+                 }
++                d if compound_directive(d).is_some() => {
++                    let c = one_flag(at(1), d, 0).map_err(|_| format!("affix dictionary: bad {d} in `{line}`"))?;
++                    if let Some(name) = compound_directive(d) {
++                        rules.cpd_flags.push((name, c));
++                    }
++                }
++                "COMPOUNDMIN" => rules.compound_min = at(1).parse::<usize>().ok().map(|m| m.clamp(1, 64)),
++                "COMPOUNDWORDMAX" => rules.compound_max = at(1).parse::<usize>().ok().map(|m| m.clamp(2, 16)),
++                "CHECKSHARPS" => rules.check_sharps = true,
+                 "ICONV" if f.len() == 3 => rules.iconv.push((at(1).to_string(), at(2).to_string())),
+                 "IGNORE" => rules.ignore = at(1).chars().collect(),
+                 "MAP" => rules.map.push(at(1).chars().collect()),
+@@ -1760,7 +2209,7 @@ pub(crate) mod tests {
+     fn unsupported_and_broken_input_is_an_error() {
+         assert!(AffixDict::from_hunspell("FLAG long\n", DIC, &[]).is_err());
+         assert!(AffixDict::from_hunspell("FLAG num\n", DIC, &[]).is_err());
+-        assert!(AffixDict::from_hunspell("COMPOUNDFLAG X\n", DIC, &[]).is_err());
++        assert!(AffixDict::from_hunspell("COMPOUNDRULE 1\n", DIC, &[]).is_err());
+         assert!(AffixDict::from_hunspell("SFX a Y 1\nSFX a 0 y [ab\n", DIC, &[]).is_err());
+         assert!(AffixDict::from_bytes(b"not deflate").is_err());
+         let ok = dict().to_bytes();
+diff --git a/crates/proof/src/de/grammar.rs b/crates/proof/src/de/grammar.rs
+new file mode 100644
+index 0000000..273fba7
+--- /dev/null
++++ b/crates/proof/src/de/grammar.rs
+@@ -0,0 +1,99 @@
++//! Generic repeated-word and spacing checks with German messages. Articles and relative
++//! pronouns that German repeats on purpose (`die die Zeitung liest`, `das, was`) aren't flagged;
++//! no German sentence-capital or comma rules are inferred.
++
++use crate::{Issue, IssueKind, ProofLang, words};
++
++/// Words German doubles on purpose: an article after a relative pronoun of the same form.
++const MAY_REPEAT: &[&str] = &["der", "die", "das", "dem", "den", "des"];
++
++fn issue(start: usize, end: usize, message: String, suggestions: Vec<String>, lang: ProofLang) -> Issue {
++    Issue { start, end, kind: IssueKind::Grammar, message, suggestions, lang }
++}
++
++/// The grammar issues of `text` in `lang` (one of the Germans).
++pub fn check(text: &str, lang: ProofLang) -> Vec<Issue> {
++    let mut issues = Vec::new();
++    repeated_words(text, &words(text), lang, &mut issues);
++    spaces(text, lang, &mut issues);
++    issues.sort_by_key(|i| (i.start, i.end));
++    issues
++}
++
++fn repeated_words(text: &str, ws: &[(usize, usize)], lang: ProofLang, v: &mut Vec<Issue>) {
++    for pair in ws.windows(2) {
++        let [(a0, b0), (a1, b1)] = pair else { continue };
++        let (Some(w0), Some(w1), Some(gap)) = (text.get(*a0..*b0), text.get(*a1..*b1), text.get(*b0..*a1)) else { continue };
++        let lower = w0.to_lowercase();
++        if !gap.is_empty()
++            && gap.chars().all(char::is_whitespace)
++            && w0.chars().all(char::is_alphabetic)
++            && lower == w1.to_lowercase()
++            && !MAY_REPEAT.contains(&lower.as_str())
++        {
++            v.push(issue(*a0, *b1, format!("Wiederholtes Wort: „{w1}“"), vec![w0.to_string()], lang));
++        }
++    }
++}
++
++fn spaces(text: &str, lang: ProofLang, v: &mut Vec<Issue>) {
++    for (i, c) in text.char_indices() {
++        if c != ' ' {
++            continue;
++        }
++        let rest = text.get(i + 1..).unwrap_or("");
++        let mut it = rest.chars();
++        let Some(p) = it.next() else { continue };
++        let after = it.next();
++        // A score keeps its spaces (`2 : 1`).
++        let ratio = p == ':'
++            && text.get(..i).and_then(|before| before.chars().next_back()).is_some_and(|c| c.is_ascii_digit())
++            && after == Some(' ')
++            && it.next().is_some_and(|c| c.is_ascii_digit());
++        let flag = !ratio
++            && match p {
++                ',' => true,
++                ';' => !matches!(after, Some(')' | '(' | '-' | 'P' | 'D')),
++                // ` ...` is an ellipsis, ` .5` a number.
++                '.' => !matches!(after, Some('.')) && !after.is_some_and(|a| a.is_ascii_digit()),
++                // ` :)` and the like are emoticons.
++                ':' | '!' | '?' => after.is_none_or(|a| a.is_whitespace() || matches!(a, '"' | '“' | '”' | '’' | '!' | '?')),
++                _ => false,
++            };
++        if flag {
++            v.push(issue(i, i + 1 + p.len_utf8(), "Leerzeichen vor Satzzeichen".into(), vec![p.to_string()], lang));
++        }
++    }
++    for (i, _) in text.match_indices("  ") {
++        if i > 0 && text.get(..i).is_some_and(|t| t.ends_with(' ')) {
++            continue;
++        }
++        v.push(issue(i, i + 2, "Doppeltes Leerzeichen".into(), vec![" ".into()], lang));
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn repeated_words_and_spaces_have_german_messages() {
++        let text = "Haus haus ,  Tür.";
++        let issues = check(text, ProofLang::DeAt);
++        assert_eq!(issues.len(), 3, "{issues:?}");
++        assert_eq!(issues[0].message, "Wiederholtes Wort: „haus“");
++        assert_eq!(issues[0].suggestions, ["Haus"]);
++        assert!(issues.iter().any(|i| i.message == "Leerzeichen vor Satzzeichen" && &text[i.start..i.end] == " ,"));
++        assert!(issues.iter().any(|i| i.message == "Doppeltes Leerzeichen"));
++        assert!(issues.iter().all(|i| i.lang == ProofLang::DeAt && i.kind == IssueKind::Grammar));
++        for text in [
++            "Die Frau, die die Zeitung liest.",
++            "Er sagt, dass das das Beste ist.",
++            "z. B. das",
++            "Spiel 2 : 1 gewonnen",
++            "Lächeln :) und .5 Liter ...",
++        ] {
++            assert!(check(text, ProofLang::De).is_empty(), "{text}: {:?}", check(text, ProofLang::De));
++        }
++    }
++}
+diff --git a/crates/proof/src/de/mod.rs b/crates/proof/src/de/mod.rs
+new file mode 100644
+index 0000000..593ee2e
+--- /dev/null
++++ b/crates/proof/src/de/mod.rs
+@@ -0,0 +1,342 @@
++//! German proofing using the installed Hunspell dictionaries (never bundled in the source: the
++//! igerman98 dictionaries are GPL-licensed; LibreOffice ships them as its `dict-de` extension
++//! (`de_DE_frami`, `de_AT_frami`, `de_CH_frami`), Debian and Ubuntu as `hunspell-de-de`,
++//! `hunspell-de-at` and `hunspell-de-ch`). Each variety reads its own dictionary: Germany
++//! ([`ProofLang::De`]) `de_DE`, Austria ([`ProofLang::DeAt`]) `de_AT` (`Jänner`, `Paradeiser`)
++//! and Switzerland ([`ProofLang::DeCh`]) `de_CH` (no `ß`: `Strasse`), each falling back to
++//! another German one.
++//!
++//! German builds words by compounding (`Kaffee` + `Club` + `Gründer` → `Kaffeeclubgründer`):
++//! the affix engine checks compounds part by part as the dictionary's compounding flags say
++//! ([`crate::affix`]), so compounds that aren't listed are correct and `KaffeeClub` or
++//! `haustür` are not. Hyphenated words are checked whole first (`E-Mail`, `Haustür-`, `-laken`),
++//! then part by part (`Kaffee-Club`). Suggestions use the dictionary's tables plus the German
++//! umlaut and `ß` spellings (`ae` → `ä`, `ss` → `ß`); grammar is the generic repeated-word and
++//! spacing checks with German messages; hyphenation uses the German patterns ([`crate::hyphen`]).
++
++pub mod grammar;
++#[cfg(test)]
++pub(crate) mod test_dict;
++
++use std::sync::Arc;
++
++use crate::ProofLang;
++use crate::affix::AffixDict;
++use crate::affix_suggest::{Split, Tuning};
++use crate::slot::DictSlot;
++
++/// The dictionary of each variety, found on first use (see [`DictSlot`]).
++pub(crate) static GERMANY_DICT: DictSlot<AffixDict> = DictSlot::new(GERMANY, "German (Germany)");
++pub(crate) static AUSTRIA_DICT: DictSlot<AffixDict> = DictSlot::new(AUSTRIA, "German (Austria)");
++pub(crate) static SWITZERLAND_DICT: DictSlot<AffixDict> = DictSlot::new(SWITZERLAND, "German (Switzerland)");
++
++/// File names of a German Hunspell dictionary for Germany, most specific first (`_frami` is
++/// LibreOffice's name), then Austria's, which spells the same apart from a few words.
++const GERMANY: &[&str] = &["de_DE", "de-DE", "de_DE_frami", "de", "de_AT", "de_AT_frami"];
++/// For Austria: its own, then Germany's.
++const AUSTRIA: &[&str] = &["de_AT", "de-AT", "de_AT_frami", "de_DE", "de_DE_frami", "de"];
++/// For Switzerland (and Liechtenstein): its own, then Germany's (which wants `ß`).
++const SWITZERLAND: &[&str] = &["de_CH", "de-CH", "de_CH_frami", "de_LI", "de_DE", "de_DE_frami", "de"];
++
++/// `lang`'s variety's dictionary; Germany's for any other language.
++fn slot(lang: ProofLang) -> &'static DictSlot<AffixDict> {
++    match lang {
++        ProofLang::DeAt => &AUSTRIA_DICT,
++        ProofLang::DeCh => &SWITZERLAND_DICT,
++        _ => &GERMANY_DICT,
++    }
++}
++
++/// The Hunspell name each variety's dictionary is known by (`de_DE`, `de_AT`, `de_CH`).
++pub fn dictionary_name(lang: ProofLang) -> &'static str {
++    slot(lang).name()
++}
++
++/// The German dictionary of `lang`'s variety: the installed one (read on first use), one given
++/// with [`install_dictionary`], or an empty one when none is available (spelling is off then).
++pub fn dictionary(lang: ProofLang) -> Arc<AffixDict> {
++    slot(lang).get()
++}
++
++/// Use this dictionary for `lang`'s variety from now on (Hunspell `.aff` and `.dic` text,
++/// decoded to UTF-8). On error the current dictionary stays.
++pub fn install_dictionary(lang: ProofLang, aff: &str, dic: &str) -> Result<(), String> {
++    slot(lang).install(aff, dic)
++}
++
++/// Is a dictionary available for `lang`'s variety (spelling is checked)?
++pub fn has_dictionary(lang: ProofLang) -> bool {
++    slot(lang).has_dictionary()
++}
++
++/// Is `word` spelled correctly in `lang`'s German? Numbers, single letters, short words in
++/// capitals (acronyms: `EU`, `ORF`), words with digits and words in other scripts are accepted,
++/// and so is every word when no dictionary is installed for the variety.
++pub fn is_correct(word: &str, lang: ProofLang) -> bool {
++    is_correct_with(&dictionary(lang), word)
++}
++
++/// [`is_correct`] with the File › Options › Proofing choices.
++pub fn is_correct_with_options(word: &str, lang: ProofLang, opts: &crate::Options) -> bool {
++    check(&dictionary(lang), word, opts)
++}
++
++/// [`is_correct`] against a given dictionary (an empty one accepts everything).
++pub fn is_correct_with(d: &AffixDict, word: &str) -> bool {
++    check(d, word, &crate::Options::default())
++}
++
++/// [`is_correct_with_options`] against a given dictionary.
++fn check(d: &AffixDict, word: &str, opts: &crate::Options) -> bool {
++    // A leading hyphen belongs to the word (`Bettbezüge und -laken`): keep it for the whole-word
++    // check; quotes and other punctuation go.
++    let lead = word.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '-');
++    let Some(w) = crate::spelling::word_to_check(d, word, opts) else {
++        return true;
++    };
++    let w = match lead.strip_prefix('-') {
++        Some(rest) if rest.starts_with(w) => lead.get(..w.len() + 1).unwrap_or(w),
++        _ => w,
++    };
++    if known(d, w) {
++        return true;
++    }
++    // Hyphenated words, part by part (`Kaffee-Club`, `Haustür-` before `und Fenster`).
++    w.contains('-') && w.split('-').all(|p| p.chars().count() <= 1 || known(d, p))
++}
++
++/// Is one word in the dictionary (a compound of its parts counts) or the user dictionary?
++fn known(d: &AffixDict, w: &str) -> bool {
++    d.check(w) || crate::in_user_dictionary(&w.to_lowercase())
++}
++
++/// The German confusions the dictionary's tables may lack: umlauts and `ß` typed without the
++/// letter (`ae`, `oe`, `ue`, `ss`) and the old spelling of `ss` after a short vowel (`daß`).
++const REP: &[(&str, &str)] = &[
++    ("ae", "ä"),
++    ("oe", "ö"),
++    ("ue", "ü"),
++    ("Ae", "Ä"),
++    ("Oe", "Ö"),
++    ("Ue", "Ü"),
++    ("ss", "ß"),
++    ("ß", "ss"),
++    ("dass", "das"),
++    ("das", "dass"),
++    ("ie", "i"),
++    ("i", "ie"),
++    ("h", ""),
++    ("ck", "k"),
++    ("k", "ck"),
++    ("tz", "z"),
++    ("z", "tz"),
++];
++
++/// The tuning of German suggestions: the dictionary's tables, umlauts with their bare letters,
++/// and the German alphabet when the dictionary has no TRY line.
++const TUNING: Tuning = Tuning {
++    split: Split::Anywhere,
++    alphabet: "esijanrtolcdugmphbyfvkwqxzäüößESIJANRTOLCDUGMPHBYFVKWQXZÄÜÖ",
++    map: &["aä", "oö", "uü", "AÄ", "OÖ", "UÜ", "sß"],
++    rep: REP,
++    ..Tuning::DEFAULT
++};
++
++/// Spelling suggestions for a German word in `lang`'s variety, best first, at most `max`, in the
++/// word's letter case.
++pub fn suggest(word: &str, max: usize, lang: ProofLang) -> Vec<String> {
++    suggest_in(&dictionary(lang), word, max)
++}
++
++/// [`suggest`] against a given dictionary.
++pub fn suggest_in(d: &AffixDict, word: &str, max: usize) -> Vec<String> {
++    crate::affix_suggest::suggest_in(d, word, max, &TUNING)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const VARIETIES: [ProofLang; 3] = [ProofLang::De, ProofLang::DeAt, ProofLang::DeCh];
++
++    #[test]
++    fn each_variety_looks_for_its_own_dictionary_first() {
++        let dir = std::env::temp_dir().join(format!("wordcraft-de-aliases-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let (de, at, ch) = (ProofLang::De, ProofLang::DeAt, ProofLang::DeCh);
++        for (name, found_by) in [
++            ("de_DE", &[de, at, ch][..]),
++            ("de_DE_frami", &[de, at, ch]),
++            ("de_AT", &[de, at]),
++            ("de_AT_frami", &[de, at]),
++            ("de_CH", &[ch]),
++            ("de_CH_frami", &[ch]),
++            ("de", &[de, at, ch]),
++        ] {
++            std::fs::write(dir.join(format!("{name}.aff")), test_dict::AFF).unwrap();
++            std::fs::write(dir.join(format!("{name}.dic")), test_dict::DIC).unwrap();
++            for lang in VARIETIES {
++                let found = crate::hunspell::find_in(&dir, slot(lang).names()).is_some();
++                assert_eq!(found, found_by.contains(&lang), "{name} for {lang:?}");
++            }
++            std::fs::remove_file(dir.join(format!("{name}.aff"))).unwrap();
++            std::fs::remove_file(dir.join(format!("{name}.dic"))).unwrap();
++        }
++        // Each variety prefers its own over a neighbour's.
++        for name in ["de_DE", "de_AT", "de_CH"] {
++            std::fs::write(dir.join(format!("{name}.aff")), test_dict::AFF).unwrap();
++            std::fs::write(dir.join(format!("{name}.dic")), test_dict::DIC).unwrap();
++        }
++        for (lang, want) in [(de, "de_DE"), (at, "de_AT"), (ch, "de_CH")] {
++            let (_, dic) = crate::hunspell::find_in(&dir, slot(lang).names()).unwrap();
++            assert_eq!(dic.file_stem().unwrap(), want, "{lang:?}");
++        }
++        std::fs::remove_dir_all(dir).unwrap();
++        assert_eq!(dictionary_name(de), "de_DE");
++        assert_eq!(dictionary_name(at), "de_AT");
++        assert_eq!(dictionary_name(ch), "de_CH");
++    }
++
++    #[test]
++    fn german_words_compounds_case_and_hyphens() {
++        let d = test_dict::dict();
++        for w in [
++            "Haus",
++            "Häuser",
++            "Tür",
++            "Türen",
++            "Haustür",
++            "Haustüren",
++            "Kaffee",
++            "Club",
++            "Kaffeeclub",
++            "Gründer",
++            "Kaffeeclubgründer",
++            "Arbeitsrecht",
++            "gehen",
++            "Gehen",
++            "GEHEN",
++            "ging",
++            "Straße",
++            "STRASSE",
++            "Straßenbahn",
++            "Kaffee-Club",
++            "Haustür-",
++            "-tür",
++        ] {
++            assert!(is_correct_with(&d, w), "{w}");
++        }
++        for w in [
++            "haustür",
++            "KaffeeClub",
++            "club",
++            "clubs",
++            "tür",
++            "Hauss",
++            "Kaffeclub",
++            "Arbeits",
++            "Arbeit-Recht-x",
++            "Strasse",
++            "gehn",
++            "Haustürr",
++            "Gründerkaffee-Clubb",
++        ] {
++            assert!(!is_correct_with(&d, w), "{w}");
++        }
++        // Options: short capitals are acronyms by default only.
++        let strict = crate::Options { ignore_uppercase: false, ..Default::default() };
++        assert!(is_correct_with(&d, "HAUSX"), "short capitals are acronyms by default");
++        assert!(!check(&d, "HAUSX", &strict));
++        assert!(check(&d, "HAUS", &strict));
++        // No dictionary: no marks.
++        assert!(is_correct_with(&AffixDict::default(), "Kaffeclub"));
++    }
++
++    #[test]
++    fn german_suggestions() {
++        let d = test_dict::dict();
++        for (word, want) in
++            [("Hauss", "Haus"), ("Kaffeclub", "Kaffeeclub"), ("Strasse", "Straße"), ("Tuer", "Tür"), ("haustür", "Haustür"), ("Haustürr", "Haustür")]
++        {
++            let got = suggest_in(&d, word, 8);
++            assert!(got.contains(&want.into()), "{word}: {got:?}");
++            assert!(got.iter().all(|s| s.split(' ').all(|p| d.check(p))), "{word}: {got:?}");
++        }
++        // Compound-only stems are never offered on their own.
++        assert!(!suggest_in(&d, "clubb", 8).contains(&"club".into()));
++    }
++
++    #[test]
++    fn german_dispatch_messages_and_varieties() {
++        for lang in VARIETIES {
++            install_dictionary(lang, test_dict::AFF, test_dict::DIC).unwrap();
++        }
++        for tag in ["de", "de-DE", "de-AT", "de-CH", "de_AT.UTF-8", "deu", "ger"] {
++            assert!(crate::has_dictionary(Some(tag)), "{tag}");
++            assert!(crate::is_correct_for("Kaffeeclubgründer", Some(tag)), "{tag}");
++            assert!(!crate::is_correct_for("Kaffeclub", Some(tag)), "{tag}");
++        }
++        let text = "Der Kaffeclub ist ist schön.";
++        let issues = crate::check_text(text, &[(0..text.len(), ProofLang::DeAt)]);
++        let spelling: Vec<&str> = issues.iter().filter(|i| i.kind == crate::IssueKind::Spelling).map(|i| &text[i.start..i.end]).collect();
++        assert!(spelling.contains(&"Kaffeclub"), "{issues:?}");
++        let mark = issues.iter().find(|i| &text[i.start..i.end] == "Kaffeclub").unwrap();
++        assert_eq!(mark.message, "Möglicher Rechtschreibfehler");
++        assert_eq!(mark.lang, ProofLang::DeAt);
++        assert!(issues.iter().any(|i| i.kind == crate::IssueKind::Grammar && i.message.starts_with("Wiederholtes Wort")), "{issues:?}");
++        assert!(crate::suggest_in("Kaffeclub", 8, ProofLang::De).contains(&"Kaffeeclub".into()));
++        // English words in a German run are German misspellings, German ones in an English run
++        // English ones.
++        assert!(!crate::is_correct_in("Kaffeeclubgründer", ProofLang::En));
++        crate::add_word("Zqkaffeewort");
++        assert!(crate::is_correct_in("zqkaffeewort", ProofLang::De));
++    }
++
++    /// The real LibreOffice dictionaries, when `WORDCRAFT_GERMAN_DICTIONARIES` names a folder
++    /// holding them (never committed: they are GPL-licensed).
++    #[test]
++    fn real_german_dictionaries_when_available() {
++        let Some(dir) = std::env::var_os("WORDCRAFT_GERMAN_DICTIONARIES") else { return };
++        let dir = std::path::PathBuf::from(dir);
++        for (name, extra_good, extra_bad) in [
++            ("de_DE_frami", &["Straße", "Grüße", "Fußballweltmeisterschaft"][..], &["Grüsse", "Strasse"][..]),
++            ("de_AT_frami", &["Jänner", "Paradeiser", "Straße", "Fußballweltmeisterschaft"], &["Grüsse"]),
++            // Swiss spelling has no `ß`.
++            ("de_CH_frami", &["Strasse", "Grüsse", "Fussballweltmeisterschaft"], &["Fußball"]),
++        ] {
++            let Some((aff, dic)) = crate::hunspell::find_in(&dir, &[name]) else { continue };
++            let d = crate::hunspell::load(&aff, &dic).unwrap();
++            let good = [
++                "Haus",
++                "Haustür",
++                "Kaffeeclub",
++                "Kaffeeclubgründer",
++                "Rechtschreibprüfung",
++                "gehen",
++                "Gehen",
++                "gegangen",
++                "Donaudampfschifffahrt",
++                "Bundesverfassungsgericht",
++                "Veranstaltungstechnik",
++                "Geschäftsführer",
++                "Lehrerinnen",
++                "Projektmanagement",
++                "E-Mail",
++                "Kaffee-Club",
++                "Haustür-",
++            ];
++            for w in good.iter().chain(extra_good) {
++                assert!(is_correct_with(&d, w), "{name}: {w}");
++            }
++            for w in ["Hauss", "Kaffeclub", "haustür", "KaffeeClub", "Rechtschreiprüfung", "gehn", "club", "Arbeits"].iter().chain(extra_bad) {
++                assert!(!is_correct_with(&d, w), "{name}: {w}");
++            }
++            let t = std::time::Instant::now();
++            for (word, want) in [("Kaffeclub", "Kaffeeclub"), ("Rechtschreiprüfung", "Rechtschreibprüfung"), ("Hauss", "Haus")] {
++                let got = suggest_in(&d, word, 6);
++                assert!(got.contains(&want.into()), "{name}: {word}: {got:?}");
++            }
++            eprintln!("{name}: 3 suggestion calls in {:?}", t.elapsed());
++        }
++    }
++}
+diff --git a/crates/proof/src/de/test_dict.rs b/crates/proof/src/de/test_dict.rs
+new file mode 100644
+index 0000000..b11ca9d
+--- /dev/null
++++ b/crates/proof/src/de/test_dict.rs
+@@ -0,0 +1,83 @@
++//! Hand-written synthetic German test data, shaped like the compounding of the igerman98
++//! dictionaries (begin, middle and end flags on suffix continuation classes, compound-only
++//! lower-case stems, `NEEDAFFIX`, `CHECKSHARPS`). No words, rules or tables were copied from a
++//! system dictionary; this is a small fixture, not a redistributable German dictionary.
++
++use crate::affix::AffixDict;
++
++pub const AFF: &str = "SET UTF-8
++TRY esijanrtolcdugmphbyfvkwqxzäüößESIJANRTOLCDUGMPHBYFVKWQXZÄÜÖ
++MAP 2
++MAP (ss)ß
++MAP (ue)ü
++CHECKSHARPS
++COMPOUNDBEGIN x
++COMPOUNDMIDDLE y
++COMPOUNDEND z
++COMPOUNDPERMITFLAG c
++ONLYINCOMPOUND o
++NEEDAFFIX h
++FORBIDDENWORD d
++COMPOUNDMIN 2
++WORDCHARS ß-.
++BREAK 1
++BREAK -
++SFX S Y 1
++SFX S 0 s .
++SFX N Y 1
++SFX N 0 n .
++SFX E Y 1
++SFX E 0 en .
++SFX R Y 2
++SFX R 0 er .
++SFX R 0 ern .
++SFX p Y 2
++SFX p aus äuser [hH]aus
++SFX p aus äusern [hH]aus
++SFX j Y 3
++SFX j 0 0/xoc .
++SFX j 0 -/zocf .
++SFX j 0 -/cz .
++SFX u Y 1
++SFX u 0 n/xoc .
++SFX t Y 1
++SFX t 0 s/xoc .
++SFX e Y 2
++SFX e 0 0/yoc .
++SFX e 0 -/zc .
++PFX k Y 2
++PFX k 0 -/coxf .
++PFX k 0 0/coy .
++PFX m Y 1
++PFX m T -t T
++";
++
++pub const DIC: &str = "22
++Haus/pj
++haus/hke
++haus/oz
++Tür/Ejm
++tür/hke
++tür/Eoz
++Kaffee/Sj
++kaffee/hke
++kaffee/Soz
++Club/Sj
++club/hke
++club/Soz
++Gründer/NSj
++gründer/NSoz
++Arbeit/Et
++recht/hke
++recht/Eoz
++gehen
++ging
++Straße/Eju
++straße/Eoz
++bahn/Eoz
++";
++
++/// The fixture as a dictionary.
++pub fn dict() -> AffixDict {
++    AffixDict::from_hunspell(AFF, DIC, &["synthetic German test data"]).unwrap_or_default()
++}
+diff --git a/crates/proof/src/hunspell.rs b/crates/proof/src/hunspell.rs
+index 1afd903..127e6e7 100644
+--- a/crates/proof/src/hunspell.rs
++++ b/crates/proof/src/hunspell.rs
+@@ -6,8 +6,9 @@
+ //! installed the language has no spelling check (no marks, no errors), like Word without the
+ //! language's proofing tools.
+ //!
+-//! Search order: the directory in `WORDCRAFT_DICTIONARIES` (or one set with
+-//! [`set_dictionary_dir`]), then the usual system locations. On the web there are none.
++//! Search order: the directory set with [`set_dictionary_dir`], the one in
++//! `WORDCRAFT_DICTIONARIES`, a `dictionaries` folder beside the program, then the usual system
++//! locations. On the web there are none.
+ 
+ use std::path::{Path, PathBuf};
+ use std::sync::RwLock;
+@@ -76,6 +77,10 @@ pub fn search_dirs(lo_exts: Option<&[String]>) -> Vec<PathBuf> {
+     if let Some(d) = std::env::var_os("WORDCRAFT_DICTIONARIES").filter(|v| !v.is_empty()) {
+         dirs.push(PathBuf::from(d));
+     }
++    // A `dictionaries` folder beside the program: a portable copy (a zip) can carry its own.
++    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
++        dirs.push(dir.join("dictionaries"));
++    }
+     // LibreOffice keeps each language under `…/share/extensions/<dict-xx>`.
+     let lo_dirs =
+         |prefix: &str| -> Vec<PathBuf> { lo_exts.map_or_else(Vec::new, |exts| exts.iter().map(|e| PathBuf::from(prefix).join(e)).collect()) };
+diff --git a/crates/proof/src/hyphen.rs b/crates/proof/src/hyphen.rs
+index b203ff1..b0b474a 100644
+--- a/crates/proof/src/hyphen.rs
++++ b/crates/proof/src/hyphen.rs
+@@ -145,7 +145,7 @@ fn core_breaks(core: &[char], lang: ProofLang) -> (Vec<usize>, Source) {
+     match lang {
+         ProofLang::Pt => return core_breaks_patterns(Patterns::pt(), core),
+         ProofLang::It => return core_breaks_patterns(Patterns::it(), core),
+-        ProofLang::De => return core_breaks_patterns(Patterns::de(), core),
++        ProofLang::De | ProofLang::DeAt | ProofLang::DeCh => return core_breaks_patterns(Patterns::de(), core),
+         _ => {}
+     }
+     if lang == ProofLang::Ru && core.iter().all(|&c| crate::ru::is_cyrillic(c)) {
+diff --git a/crates/proof/src/lang.rs b/crates/proof/src/lang.rs
+index 8f68140..c062930 100644
+--- a/crates/proof/src/lang.rs
++++ b/crates/proof/src/lang.rs
+@@ -66,10 +66,17 @@ pub enum ProofLang {
+     /// dictionary (else the neighbouring Rioplatense `es_AR`, a Latin American or a generic one),
+     /// and the `vos` forms of verbs (`tenés`, `vení`, `decime`) accepted ([`crate::es::voseo`]).
+     EsUy,
+-    /// German (`de`, `de-DE`, `de-AT`, `de-CH`…): hyphenation by the German patterns (reformed
+-    /// spelling). There is no German dictionary or grammar yet, so, as for [`ProofLang::Other`],
+-    /// no spelling or grammar marks.
++    /// German of Germany (`de`, `de-DE`, and every region not listed for [`ProofLang::DeAt`] or
++    /// [`ProofLang::DeCh`]; also ISO 639-2 `deu`/`ger`): the installed Hunspell `de_DE`
++    /// dictionary with compounds ([`crate::de`]), generic checks with German messages and the
++    /// German hyphenation patterns (reformed spelling).
+     De,
++    /// Austrian German (`de-AT`): [`ProofLang::De`]'s tools with the installed `de_AT`
++    /// dictionary (`Jänner`, `Paradeiser`), else Germany's.
++    DeAt,
++    /// Swiss German (`de-CH`, `de-LI`): [`ProofLang::De`]'s tools with the installed `de_CH`
++    /// dictionary (no `ß`: `Strasse`, `Grüsse`), else Germany's.
++    DeCh,
+     /// A language without proofing tools here (`fr-FR`, `ja-JP`, `x-none`…). Like Word without
+     /// the language's proofing tools: no spelling or grammar marks, so its words are never
+     /// flagged as English misspellings. Hyphenation keeps using the English patterns, as before
+@@ -79,7 +86,7 @@ pub enum ProofLang {
+ 
+ impl ProofLang {
+     /// Every language with a spelling dictionary, in display order.
+-    pub const PROOFED: [ProofLang; 15] = [
++    pub const PROOFED: [ProofLang; 18] = [
+         ProofLang::En,
+         ProofLang::EnGb,
+         ProofLang::EnCa,
+@@ -95,6 +102,9 @@ impl ProofLang {
+         ProofLang::EsMx,
+         ProofLang::Es419,
+         ProofLang::EsUy,
++        ProofLang::De,
++        ProofLang::DeAt,
++        ProofLang::DeCh,
+     ];
+ 
+     /// The proofing language of a BCP 47 tag (`pl-PL`, `en_GB`, `PL`…). The primary subtag
+@@ -127,7 +137,7 @@ impl ProofLang {
+         } else if primary.eq_ignore_ascii_case("es") || primary.eq_ignore_ascii_case("spa") {
+             ProofLang::spanish(tag)
+         } else if ["de", "deu", "ger"].iter().any(|c| primary.eq_ignore_ascii_case(c)) {
+-            ProofLang::De
++            ProofLang::german(tag)
+         } else {
+             ProofLang::Other
+         }
+@@ -156,6 +166,22 @@ impl ProofLang {
+         }
+     }
+ 
++    /// The German of a German tag, by its [`region`]: Austria is [`ProofLang::DeAt`], Switzerland
++    /// and Liechtenstein [`ProofLang::DeCh`], and Germany, any other region and no region are
++    /// [`ProofLang::De`].
++    fn german(tag: &str) -> ProofLang {
++        match region(tag) {
++            Some(r) if r.eq_ignore_ascii_case("AT") => ProofLang::DeAt,
++            Some(r) if r.eq_ignore_ascii_case("CH") || r.eq_ignore_ascii_case("LI") => ProofLang::DeCh,
++            _ => ProofLang::De,
++        }
++    }
++
++    /// Is this one of the Germans ([`ProofLang::De`], [`ProofLang::DeAt`], [`ProofLang::DeCh`])?
++    pub fn is_german(self) -> bool {
++        matches!(self, ProofLang::De | ProofLang::DeAt | ProofLang::DeCh)
++    }
++
+     /// Is this one of the Englishes ([`ProofLang::En`], [`ProofLang::EnGb`], [`ProofLang::EnCa`])?
+     pub fn is_english(self) -> bool {
+         matches!(self, ProofLang::En | ProofLang::EnGb | ProofLang::EnCa)
+@@ -181,7 +207,7 @@ impl ProofLang {
+             ProofLang::Cs => "cs",
+             ProofLang::Id => "id",
+             ProofLang::Es | ProofLang::EsMx | ProofLang::Es419 | ProofLang::EsUy => "es",
+-            ProofLang::De => "de",
++            ProofLang::De | ProofLang::DeAt | ProofLang::DeCh => "de",
+             ProofLang::Other => "",
+         }
+     }
+@@ -332,9 +358,16 @@ mod tests {
+     fn tags_resolve_additional_locales_and_defaults() {
+         assert_tags(&["bg", "bg-BG", "BG_bg", "bg_BG.UTF-8", "bul"], ProofLang::Bg);
+         assert_tags(&["tr", "tr-TR", "tr-CY", "TR_tr", "tur"], ProofLang::Tr);
+-        assert_tags(&["de", "de-DE", "de-CH", "DE_at", "deu", "ger"], ProofLang::De);
++        assert_tags(&["de", "de-DE", "DE_de", "de_DE.UTF-8", "de-BE", "de-LU", "deu", "ger", "deu-DE"], ProofLang::De);
++        assert_tags(&["de-AT", "DE_at", "de_AT.UTF-8", "de-Latn-AT", "deu-AT"], ProofLang::DeAt);
++        assert_tags(&["de-CH", "de_CH", "DE-ch", "de-LI", "de_CH.UTF-8"], ProofLang::DeCh);
++        for l in [ProofLang::De, ProofLang::DeAt, ProofLang::DeCh] {
++            assert!(l.is_german() && l.is_proofed() && ProofLang::PROOFED.contains(&l), "{l:?}");
++            assert!(!l.is_english() && !l.is_spanish());
++            assert_eq!(l.code(), "de");
++        }
++        assert!(!ProofLang::En.is_german() && !ProofLang::Other.is_german());
+         assert_tags(&["ru", "ru-RU", "RU-ru", "ru_RU", "ru_RU.UTF-8", " ru-RU ", "rus"], ProofLang::Ru);
+-        assert!(!ProofLang::De.is_proofed());
+         assert!(!ProofLang::Bg.is_proofed());
+         assert_eq!(ProofLang::Bg.code(), "bg");
+         assert!(ProofLang::Pt.is_proofed() && !ProofLang::Other.is_proofed());
+diff --git a/crates/proof/src/lib.rs b/crates/proof/src/lib.rs
+index f92ad19..e3f7117 100644
+--- a/crates/proof/src/lib.rs
++++ b/crates/proof/src/lib.rs
+@@ -39,8 +39,11 @@
+ //!   `es_UY`, with fallbacks; not bundled), dictionary-driven suggestions, Uruguayan `vos` forms,
+ //!   and generic checks plus the opening `¿`/`¡` with Spanish messages. Hyphenation uses the
+ //!   existing English fallback.
+-//! - **German** ([`ProofLang::De`]): hyphenation by `hyph-utf8`'s German patterns (reformed
+-//!   spelling, MIT); no spelling or grammar marks yet.
++//! - **German** ([`ProofLang::De`], [`ProofLang::DeAt`], [`ProofLang::DeCh`], module [`de`]):
++//!   each variety's installed Hunspell dictionary (`de_DE`, `de_AT`, `de_CH`, LibreOffice's
++//!   `*_frami` too; not bundled — the igerman98 files are GPL-licensed) with compounds checked
++//!   part by part, suggestions with umlauts and `ß`, generic checks with German messages, and
++//!   hyphenation by `hyph-utf8`'s German patterns (reformed spelling, MIT).
+ //! - **Other languages** ([`ProofLang::Other`]): no spelling or grammar marks, like Word without
+ //!   the language's proofing tools.
+ //! - **Hyphenation** ([`hyphen`]): dictionary, Liang patterns (English, Polish, Portuguese,
+@@ -53,6 +56,7 @@ pub mod affix;
+ mod affix_suggest;
+ pub mod bg;
+ pub mod cs;
++pub mod de;
+ pub mod dict;
+ pub mod en_variants;
+ pub mod es;
+@@ -176,7 +180,7 @@ struct Language {
+ 
+ /// Every language proofed against a Hunspell dictionary, in the order File › Options › Proofing
+ /// lists them. English has a built-in word list and is handled apart.
+-static LANGUAGES: [Language; 12] = [
++static LANGUAGES: [Language; 15] = [
+     Language {
+         lang: ProofLang::Pl,
+         slot: &pl::DICT,
+@@ -275,6 +279,32 @@ static LANGUAGES: [Language; 12] = [
+         suggest: es::suggest,
+         grammar: |t, l, _| es::grammar::check(t, l),
+     },
++    // German has no sentence-capital rule here either: its nouns are capitalized anywhere, and
++    // the dictionary already says which words are.
++    Language {
++        lang: ProofLang::De,
++        slot: &de::GERMANY_DICT,
++        message: "Möglicher Rechtschreibfehler",
++        is_correct: de::is_correct_with_options,
++        suggest: de::suggest,
++        grammar: |t, l, _| de::grammar::check(t, l),
++    },
++    Language {
++        lang: ProofLang::DeAt,
++        slot: &de::AUSTRIA_DICT,
++        message: "Möglicher Rechtschreibfehler",
++        is_correct: de::is_correct_with_options,
++        suggest: de::suggest,
++        grammar: |t, l, _| de::grammar::check(t, l),
++    },
++    Language {
++        lang: ProofLang::DeCh,
++        slot: &de::SWITZERLAND_DICT,
++        message: "Möglicher Rechtschreibfehler",
++        is_correct: de::is_correct_with_options,
++        suggest: de::suggest,
++        grammar: |t, l, _| de::grammar::check(t, l),
++    },
+ ];
+ 
+ /// `lang`'s row in [`LANGUAGES`]; `None` for English and the languages WordCraft doesn't proof.
+@@ -839,7 +869,7 @@ pub fn is_correct_in_with(word: &str, lang: ProofLang, opts: &Options) -> bool {
+     if lang.is_english() {
+         return is_correct_english(word, lang, opts);
+     }
+-    // A language WordCraft doesn't proof (Bulgarian, German, any other) has no spelling marks.
++    // A language WordCraft doesn't proof (Bulgarian, any other) has no spelling marks.
+     language(lang).is_none_or(|l| accepted_by_options(word, opts) || (l.is_correct)(word, lang, opts))
+ }
+ 
+@@ -1069,6 +1099,9 @@ mod tests {
+             (ProofLang::EsMx, "es_MX"),
+             (ProofLang::Es419, "es_419"),
+             (ProofLang::EsUy, "es_UY"),
++            (ProofLang::De, "de_DE"),
++            (ProofLang::DeAt, "de_AT"),
++            (ProofLang::DeCh, "de_CH"),
+         ] {
+             assert_eq!(dictionary_needed(l, false), Some(name), "{l:?}");
+             assert_eq!(dictionary_needed(l, true), None, "{l:?}");
+@@ -1078,7 +1111,7 @@ mod tests {
+             let english = matches!(l, ProofLang::En | ProofLang::EnGb | ProofLang::EnCa);
+             assert_eq!(dictionary_needed(l, false).is_some(), !english, "{l:?}");
+         }
+-        for l in [ProofLang::En, ProofLang::Bg, ProofLang::De, ProofLang::Other] {
++        for l in [ProofLang::En, ProofLang::Bg, ProofLang::Other] {
+             assert_eq!(dictionary_needed(l, false), None);
+         }
+         // Installed dictionaries and the built-in English list: no hint.
+@@ -1119,6 +1152,9 @@ mod tests {
+             ("es_MX", es::test_dict::AFF, es::test_dict::DIC_AMERICAS),
+             ("es_419", es::test_dict::AFF, es::test_dict::DIC_AMERICAS),
+             ("es_UY", es::test_dict::AFF, es::test_dict::DIC_AMERICAS),
++            ("de_DE", de::test_dict::AFF, de::test_dict::DIC),
++            ("de_AT", de::test_dict::AFF, de::test_dict::DIC),
++            ("de_CH", de::test_dict::AFF, de::test_dict::DIC),
+         ] {
+             std::fs::write(dir.join(format!("{name}.aff")), aff).unwrap();
+             std::fs::write(dir.join(format!("{name}.dic")), dic).unwrap();
+@@ -1137,7 +1173,8 @@ mod tests {
+         // the languages' own tests install theirs concurrently, so an exact path would race them.
+         // The folder is searched first whatever is in use.
+         let found = installed_dictionaries();
+-        let names = ["pl_PL", "pt_BR", "it_IT", "hr_HR", "tr_TR", "ru_RU", "cs_CZ", "id_ID", "es_ES", "es_MX", "es_419", "es_UY"];
++        let names =
++            ["pl_PL", "pt_BR", "it_IT", "hr_HR", "tr_TR", "ru_RU", "cs_CZ", "id_ID", "es_ES", "es_MX", "es_419", "es_UY", "de_DE", "de_AT", "de_CH"];
+         assert_eq!(
+             found.iter().map(|(lang, _)| *lang).collect::<Vec<_>>(),
+             [
+@@ -1152,7 +1189,10 @@ mod tests {
+                 ProofLang::Es,
+                 ProofLang::EsMx,
+                 ProofLang::Es419,
+-                ProofLang::EsUy
++                ProofLang::EsUy,
++                ProofLang::De,
++                ProofLang::DeAt,
++                ProofLang::DeCh
+             ]
+         );
+         for ((lang, path), name) in found.iter().zip(names) {
+@@ -1746,7 +1786,7 @@ mod tests {
+         for l in [None, Some(""), Some("  "), Some("en"), Some("en-US"), Some("en-GB"), Some("EN-us"), Some("en_US")] {
+             assert!(has_dictionary(l), "{l:?}");
+         }
+-        for l in [Some("lt-LT"), Some("fr-FR"), Some("de"), Some("uk"), Some("-US"), Some("e")] {
++        for l in [Some("lt-LT"), Some("fr-FR"), Some("nl"), Some("uk"), Some("-US"), Some("e")] {
+             assert!(!has_dictionary(l), "{l:?}");
+         }
+         // The gate follows the dictionaries, not English: every proofed language is proofed.
+diff --git a/crates/ui-egui/src/app.rs b/crates/ui-egui/src/app.rs
+index 6223b57..71f918c 100644
+--- a/crates/ui-egui/src/app.rs
++++ b/crates/ui-egui/src/app.rs
+@@ -223,11 +223,14 @@ impl WordApp {
+         // (a Polish interface: Polish spelling, grammar and hyphenation from the first word).
+         // An English interface writes the region's English (English (UK) on a British system,
+         // #1045), a Spanish one the region's Spanish (Spanish (Uruguay) on a Uruguayan system,
+-        // Spain's elsewhere, #3360).
++        // Spain's elsewhere, #3360). A German interface writes the region's German (German
++        // (Austria) on an Austrian system), and so does an English one on a German-speaking
++        // system: German text is then never checked as US English.
+         let editing = match lang.editing_lang() {
+             Some(t) => Some(t.to_string()),
+-            None if lang.code() == "en" => self.session.region_english(),
++            None if lang.code() == "en" => self.session.region_english().or_else(|| self.session.region_german()),
+             None if lang.code() == "es" => Some(self.session.region_spanish()),
++            None if lang.code() == "de" => Some(self.session.region_german().unwrap_or_else(|| "de-DE".into())),
+             None => None,
+         };
+         if self.applied_editing.as_ref().is_none_or(|(l, e)| *l != lang || *e != editing) {
+diff --git a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
+index 30a5631..f6d60f3 100644
+--- a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
++++ b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
+@@ -255,7 +255,7 @@ pub(super) fn manual_ui(app: &mut WordApp, ui: &mut Ui, f: &mut ManualForm) -> b
+ // Language
+ 
+ /// Proofing languages offered, by BCP 47 tag, with their English names (translated for display).
+-pub const LANGUAGES: [(&str, &str); 38] = [
++pub const LANGUAGES: [(&str, &str); 40] = [
+     ("en-US", "English (United States)"),
+     ("en-GB", "English (United Kingdom)"),
+     ("en-AU", "English (Australia)"),
+@@ -265,6 +265,8 @@ pub const LANGUAGES: [(&str, &str); 38] = [
+     ("en-NZ", "English (New Zealand)"),
+     ("en-ZA", "English (South Africa)"),
+     ("de-DE", "German (Germany)"),
++    ("de-AT", "German (Austria)"),
++    ("de-CH", "German (Switzerland)"),
+     ("fr-FR", "French (France)"),
+     ("es-ES", "Spanish (Spain)"),
+     ("es-MX", "Spanish (Mexico)"),
+diff --git a/crates/ui-egui/src/i18n.rs b/crates/ui-egui/src/i18n.rs
+index 63a1c52..0de5f75 100644
+--- a/crates/ui-egui/src/i18n.rs
++++ b/crates/ui-egui/src/i18n.rs
+@@ -98,7 +98,8 @@ pub static LANGUAGES: [LangInfo; 27] = [
+     LangInfo { code: "cs", prefer_hans: false, editing_lang: Some("cs-CZ") },
+     LangInfo { code: "et", prefer_hans: false, editing_lang: None },
+     // German, neutral across Germany, Austria and Switzerland; `de`, `de-DE`, `de-AT`, `de-CH` …
+-    // resolve here.
++    // resolve here. No fixed editing language: new documents are written in the region's German
++    // (`Session::region_german`; Germany's elsewhere), which `wordcraft-proof` checks.
+     LangInfo { code: "de", prefer_hans: false, editing_lang: None },
+     // Russian; `ru`, `ru-RU`, `ru_RU.UTF-8` and other regions resolve here.
+     LangInfo { code: "ru", prefer_hans: false, editing_lang: None },
+diff --git a/crates/ui-egui/src/options.rs b/crates/ui-egui/src/options.rs
+index 83f9d77..4f83446 100644
+--- a/crates/ui-egui/src/options.rs
++++ b/crates/ui-egui/src/options.rs
+@@ -108,8 +108,10 @@ impl MeasureExt for egui::DragValue<'_> {
+ 
+ /// Regions offered in File › Options › Advanced › Region (any locale tag works through
+ /// `file.options`): Letter and A4 countries, decimal point and decimal comma.
+-const REGIONS: [&str; 16] =
+-    ["en-US", "en-CA", "en-GB", "en-AU", "en-IN", "es-MX", "es-ES", "pt-BR", "fr-FR", "de-DE", "it-IT", "pl-PL", "ru-RU", "ja-JP", "zh-CN", "ko-KR"];
++const REGIONS: [&str; 18] = [
++    "en-US", "en-CA", "en-GB", "en-AU", "en-IN", "es-MX", "es-ES", "pt-BR", "fr-FR", "de-DE", "de-AT", "de-CH", "it-IT", "pl-PL", "ru-RU", "ja-JP",
++    "zh-CN", "ko-KR",
++];
+ 
+ /// The units offered, with their names.
+ pub const UNITS: [(Unit, &str); 5] = [
+@@ -395,8 +397,11 @@ fn language_name(lang: wordcraft_engine::proof::ProofLang) -> &'static str {
+         ProofLang::EsMx => tl!("Spanish (Mexico)"),
+         ProofLang::Es419 => tl!("Spanish (Latin America)"),
+         ProofLang::EsUy => tl!("Spanish (Uruguay)"),
+-        // English uses its bundled word list; Bulgarian and German have no dictionary yet.
+-        ProofLang::En | ProofLang::EnGb | ProofLang::EnCa | ProofLang::Bg | ProofLang::De | ProofLang::Other => "",
++        ProofLang::De => tl!("German (Germany)"),
++        ProofLang::DeAt => tl!("German (Austria)"),
++        ProofLang::DeCh => tl!("German (Switzerland)"),
++        // English uses its bundled word list; Bulgarian has no dictionary yet.
++        ProofLang::En | ProofLang::EnGb | ProofLang::EnCa | ProofLang::Bg | ProofLang::Other => "",
+     }
+ }
+ 
+-- 
+2.43.0
+
