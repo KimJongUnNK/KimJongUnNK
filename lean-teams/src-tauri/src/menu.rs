@@ -7,6 +7,7 @@
 //! that write settings: it may only open the menu.
 
 use crate::{config::Config, overlay, AppState, MAIN};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     AppHandle, LogicalPosition, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
@@ -96,6 +97,33 @@ fn panel_position<R: Runtime>(main: &WebviewWindow<R>) -> Option<(f64, f64)> {
     Some((x, y))
 }
 
+/// Set while the menu window is being created, so a second press of the
+/// shortcut during creation does not try to build it twice.
+static CREATING: AtomicBool = AtomicBool::new(false);
+
+fn show_panel<R: Runtime>(panel: &WebviewWindow<R>, position: Option<(f64, f64)>) {
+    // Position after show: some window managers ignore it on hidden windows.
+    let _ = panel.show();
+    if let Some((x, y)) = position {
+        let _ = panel.set_position(LogicalPosition::new(x, y));
+    }
+    let _ = panel.set_focus();
+}
+
+fn create_panel<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    let main = main_window(app).ok_or(tauri::Error::WindowNotFound)?;
+    WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()))
+        .title("Lean Teams Overlay")
+        .inner_size(PANEL_WIDTH, PANEL_HEIGHT)
+        .resizable(false)
+        .decorations(false)
+        .skip_taskbar(true)
+        .visible(false)
+        // Owned by the Teams window: stays above it, follows minimize.
+        .parent(&main)?
+        .build()
+}
+
 /// Opens the menu next to Teams, or hides it if it is showing. The window is
 /// created once and then only shown/hidden, so it opens instantly.
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>) {
@@ -111,43 +139,25 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>) {
     };
     let position = panel_position(&main);
 
-    let panel = match app.get_webview_window(PANEL) {
-        Some(panel) => {
-            let _ = panel.eval("window.leanPanel && window.leanPanel.load();");
-            panel
-        }
-        None => {
-            let mut builder =
-                WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()))
-                    .title("Lean Teams Overlay")
-                    .inner_size(PANEL_WIDTH, PANEL_HEIGHT)
-                    .resizable(false)
-                    .decorations(false)
-                    .skip_taskbar(true)
-                    .visible(false);
-            // Owned by the Teams window: stays above it, follows minimize.
-            builder = match builder.parent(&main) {
-                Ok(owned) => owned,
-                Err(err) => {
-                    eprintln!("lean-teams: overlay menu parent: {err}");
-                    return;
-                }
-            };
-            match builder.build() {
-                Ok(panel) => panel,
-                Err(err) => {
-                    eprintln!("lean-teams: could not open overlay menu: {err}");
-                    return;
-                }
-            }
-        }
-    };
-    // Position after show: some window managers ignore it on hidden windows.
-    let _ = panel.show();
-    if let Some((x, y)) = position {
-        let _ = panel.set_position(LogicalPosition::new(x, y));
+    if let Some(panel) = app.get_webview_window(PANEL) {
+        let _ = panel.eval("window.leanPanel && window.leanPanel.load();");
+        show_panel(&panel, position);
+        return;
     }
-    let _ = panel.set_focus();
+    if CREATING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // Building a webview on the main thread deadlocks or fails on Windows
+    // (tauri-apps/wry#583), and the shortcut, tray and command handlers all
+    // run there. Build on a worker thread instead.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        match create_panel(&app) {
+            Ok(panel) => show_panel(&panel, position),
+            Err(err) => eprintln!("lean-teams: could not open overlay menu: {err}"),
+        }
+        CREATING.store(false, Ordering::Release);
+    });
 }
 
 /// The shortcut is only registered while Teams has focus, so it never steals
