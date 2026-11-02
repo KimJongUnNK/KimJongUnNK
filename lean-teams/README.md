@@ -97,20 +97,28 @@ sudo bash lean-teams/scripts/measure-macos.sh
 
 ## Overlay & Mods
 
-Lean Teams lässt sich direkt in Teams umgestalten, ohne Neustart.
+Teams in deinen Farben und mit deinen Mods, alles live und ohne Neustart.
 
-**Overlay-Menü:** **Strg + Shift + L** (Mac: **⌘ + Shift + L**), der kleine **LT**-Knopf unten links oder Tray → *Overlay-Menü*.
+**Overlay-Menü öffnen:**
+- **Strg + Shift + L** (Mac: **⌘ + Shift + L**). Das Kürzel ist auf Betriebssystem-Ebene registriert, Teams oder WebView2 können es nicht abfangen. Es ist nur aktiv, solange Lean Teams im Vordergrund ist, und klaut Excel und Co. also nichts.
+- den kleinen **LT**-Knopf unten links in Teams
+- Tray/Menüleiste → *Overlay-Menü*
+
+Das Menü ist ein eigenes kleines Fenster oben rechts über Teams. **Es gibt keinen Speichern-Knopf:** Jede Änderung wirkt sofort und wird automatisch gespeichert. **Esc** oder das Kürzel schließt es wieder.
 
 | Im Menü | Wirkung |
 |---|---|
-| Eigene Akzentfarbe | Ersetzt das Teams-Lila über Teams' eigene Design-Variablen. Bei hellen Farben wird der Text darauf automatisch schwarz |
+| Akzentfarbe | 9 Vorlagen, eigene Farbe oder Teams-Standard. Färbt **die ganze Seite** um, Farbwechsel werden weich überblendet |
+| Hintergrund einfärben | 0–40 %: Hintergründe und Ränder bekommen einen Hauch deiner Akzentfarbe |
 | Zoom | 50–200 %, alternativ Strg/⌘ + Plus/Minus |
-| Privacy-Blur | Teams wird unscharf, sobald das Fenster nicht im Fokus ist (Screen-Sharing, Schulterblicke) |
-| Immer im Vordergrund | Fenster bleibt über allen anderen |
+| Privacy-Blur | Teams wird unscharf, sobald du das Fenster verlässt (nicht, wenn du ins Menü klickst) |
+| Immer im Vordergrund | Teams bleibt über allen anderen Fenstern |
 | Mods | Jeder Mod im `mods`-Ordner einzeln an/aus |
-| Eigenes CSS | Editor für `custom.css`, wirkt sofort beim Speichern |
+| Eigenes CSS | Editor für `custom.css`, wirkt beim Tippen |
 
-**Selbst modden:** Alles liegt als normale Dateien im Einstellungsordner (Knopf *Ordner öffnen*):
+**Wie die Akzentfarbe die ganze Seite erwischt:** Die Recolor-Engine (`theme.js`) kennt keine Teams-Klassennamen. Sie durchsucht alle Stylesheets, auch die, die Teams während der Laufzeit befüllt, nach Farbvariablen und Farbwerten im Teams-Lila. Diese gibt sie in deinem Farbton aus, mit derselben Helligkeit und Transparenz, also passend für Hell- und Dunkelmodus. Neue Styles erkennt sie laufend nach. Andere Farben (Rot für Fehler, Grün für „verfügbar“) bleiben unangetastet. Deshalb übersteht das Teams-Updates.
+
+**Selbst modden:** Alles liegt als normale Dateien im Einstellungsordner (im Menü: *Ordner öffnen*):
 
 ```
 config.json      Einstellungen (inkl. "overlay": {...})
@@ -121,14 +129,14 @@ mods/            jede .css- und .js-Datei wird geladen (alphabetisch)
   _beispiel-konsole.js
 ```
 
-- **Selektoren finden:** Tray → *Entwicklertools* (oder im Menü). Dann mit dem Pfeil-Werkzeug auf ein Element klicken. Nimm `[data-tid="…"]`-Attribute, die generierten Klassennamen von Teams ändern sich mit jedem Update.
+- **Selektoren finden:** Im Menü *Entwicklertools*, dann mit dem Pfeil-Werkzeug auf ein Element klicken. Nimm `[data-tid="…"]`-Attribute, die generierten Klassennamen von Teams ändern sich mit jedem Update.
 - **CSS-Mods** sind reine Optik.
-- **JS-Mods** laufen mit Teams' Rechten, sehen also deine Chats. Leg nur eigenen oder geprüften Code ab. Jeder Mod läuft isoliert: Ein Fehler in einem Mod stoppt die anderen nicht.
-- **Kein Neustart nötig:** Tray → *Overlay neu laden*. CSS wirkt sofort, bei geänderten JS-Mods lädt Teams kurz neu.
+- **JS-Mods** laufen mit Teams' Rechten, sehen also deine Chats. Leg nur eigenen oder geprüften Code ab. Jeder Mod läuft isoliert, ein Fehler stoppt die anderen nicht.
+- **Dateien von Hand geändert?** Tray → *Overlay neu laden*. CSS wirkt sofort, bei geänderten JS-Mods lädt Teams kurz neu.
 
-Getestet unter einer Teams-ähnlich strengen Content-Security-Policy mit Trusted Types: Das Menü baut sein DOM ohne `innerHTML` und nutzt Constructable Stylesheets in einem eigenen Shadow-DOM, Teams' CSS kann es also nicht verbiegen.
+**Sicherheit:** Die Teams-Seite darf das Menü nur *öffnen* (`overlay_menu_toggle`) und fragen, ob der LT-Knopf sichtbar sein soll. Einstellungen ändern, `custom.css` schreiben und Mods schalten kann nur das lokale Menüfenster ([`capabilities/overlay-panel.json`](src-tauri/capabilities/overlay-panel.json)), nicht die Webseite.
 
-**Sicherheit:** Die Teams-Seite darf über das Menü nur Overlay-Einstellungen und `custom.css` speichern, vorhandene Mods an- und ausschalten, den Ordner und die Entwicklertools öffnen. JS-Mods anlegen oder ändern kann sie nicht, das geht nur über die Dateien.
+**Getestet:** Die CI startet die App auf Windows (WebView2), macOS (WKWebView) und Linux (WebKitGTK), öffnet das Menü und prüft, dass es vollständig gerendert ist (`LEAN_TEAMS_SELFTEST`). Recolor-Engine, Live-Vorschau, Autosave und LT-Knopf sind zusätzlich gegen eine Seite mit Teams-ähnlich strenger Content-Security-Policy und Trusted Types getestet.
 
 ## Einstellungen
 
@@ -150,7 +158,7 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 | `extra_browser_args` | `""` | Windows: zusätzliche Chromium-Switches, wörtlich angehängt |
 | `native_notifications` | `true` | Web-Notifications auf OS-Notifications umleiten. `false` = WebView-Verhalten |
 | `close_to_tray` | `true` | `false` = Schließen beendet die App |
-| `overlay` | siehe oben | `accent_color` (`"#RRGGBB"` oder `null`), `zoom`, `privacy_blur`, `custom_css`, `mods`, `always_on_top`, `panel_button`, am einfachsten über das Overlay-Menü |
+| `overlay` | siehe oben | `accent_color` (`"#RRGGBB"` oder `null`), `tint`, `zoom`, `privacy_blur`, `custom_css`, `mods`, `always_on_top`, `panel_button`, am einfachsten über das Overlay-Menü |
 
 Kaputtes JSON führt nicht zum Absturz, die App startet dann mit Defaults und schreibt eine Warnung auf stderr.
 
@@ -187,6 +195,7 @@ lean-teams/
 ├── scripts/measure.ps1          RAM/Disk-Vergleich (Windows)
 ├── scripts/measure-macos.sh     RAM/Disk-Vergleich (macOS)
 ├── assets/icon-source.png       Quelle für alle Icons (npx @tauri-apps/cli icon)
+├── dist/panel.html, panel.js    Overlay-Menü (eigenes Fenster)
 └── src-tauri/
     ├── capabilities/teams.json  IPC-Freigaben für die Teams-Origins
     ├── tauri.conf.json          Bundle-Konfiguration
@@ -194,8 +203,10 @@ lean-teams/
         ├── main.rs              Fenster, Tray, Events, IPC-Befehle
         ├── config.rs            config.json + Chromium-Switches
         ├── policy.rs            Link-Routing + Ungelesen-Parser (pure, getestet)
-        ├── overlay.rs           Akzentfarbe, Blur, custom.css, mods/ (getestet)
-        ├── panel.js             Overlay-Menü in Teams (Shadow-DOM)
+        ├── overlay.rs           Einstellungen, custom.css, mods/ (getestet)
+        ├── menu.rs              Overlay-Menüfenster, Live-Anwendung, Tastenkürzel
+        ├── theme.js             Recolor-Engine in Teams
+        ├── lt-button.js         LT-Knopf in Teams
         ├── notify.rs            OS-Notifications via notify-rust
         ├── webview2.rs          Windows: Memory-Target + Cache leeren (COM)
         ├── macos.rs             macOS: Cache leeren (WKWebsiteDataStore)

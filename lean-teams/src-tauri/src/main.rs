@@ -10,6 +10,7 @@
 mod config;
 #[cfg(target_os = "macos")]
 mod macos;
+mod menu;
 mod notify;
 mod overlay;
 mod policy;
@@ -29,54 +30,18 @@ use tauri::{
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_opener::OpenerExt;
 
-const MAIN: &str = "main";
+pub(crate) const MAIN: &str = "main";
 const TRAY: &str = "tray";
 pub(crate) const APP_NAME: &str = "Lean Teams";
 const NOTIFICATION_SHIM: &str = include_str!("notification-shim.js");
 const MINIMIZED_ARG: &str = "--minimized";
 
-struct AppState {
-    config: Config,
+pub(crate) struct AppState {
+    pub(crate) config: Config,
     unread: Mutex<u32>,
-    /// Overlay settings, stylesheet and JS mods; replaced by "Overlay neu laden".
-    overlay: Mutex<overlay::Overlay>,
-}
-
-/// Re-reads config.json, custom.css and the mods folder and applies them to
-/// the running window, so the user can iterate without restarting. CSS
-/// changes apply in place; JS mods cannot be unloaded, so a change there
-/// reloads the page.
-fn reload_overlay<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(dir) = app.path().app_config_dir() else {
-        return;
-    };
-    let next = overlay::Overlay::load(&dir, Config::load_or_init(&dir).overlay);
-    let state = app.state::<AppState>();
-    let js_changed = {
-        let mut current = state.overlay.lock().unwrap();
-        let changed = current.js != next.js;
-        *current = next.clone();
-        changed
-    };
-    if let Some(window) = app.get_webview_window(MAIN) {
-        let _ = window.eval(overlay::apply_script(&next.css));
-        let _ = window.set_zoom(next.settings.zoom());
-        let _ = window.set_always_on_top(next.settings.always_on_top);
-        if js_changed {
-            let _ = window.reload();
-        }
-    }
-}
-
-/// Applies stylesheet and JS mods to the page that just finished loading.
-fn apply_overlay<R: Runtime>(window: &WebviewWindow<R>) {
-    let current = window.state::<AppState>().overlay.lock().unwrap().clone();
-    if !current.css.is_empty() {
-        let _ = window.eval(overlay::apply_script(&current.css));
-    }
-    for script in current.js {
-        let _ = window.eval(script);
-    }
+    /// Overlay settings, stylesheet and JS mods; replaced live by the
+    /// overlay menu and by "Overlay neu laden".
+    pub(crate) overlay: Mutex<overlay::Overlay>,
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
@@ -109,70 +74,6 @@ fn notify<R: Runtime>(
     if !window.is_focused().unwrap_or(false) {
         let _ = window.request_user_attention(Some(UserAttentionType::Informational));
     }
-}
-
-#[derive(serde::Serialize)]
-struct OverlayStateDto {
-    settings: overlay::OverlayConfig,
-    custom_css: String,
-    mods: Vec<overlay::ModFile>,
-}
-
-fn config_dir<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| e.to_string())
-}
-
-/// Overlay menu: current settings, custom.css and the mods folder.
-#[tauri::command]
-fn overlay_state<R: Runtime>(app: AppHandle<R>) -> Result<OverlayStateDto, String> {
-    let dir = config_dir(&app)?;
-    Ok(OverlayStateDto {
-        settings: Config::load_or_init(&dir).overlay,
-        custom_css: overlay::load_user_css(&dir),
-        mods: overlay::list_mods(&dir),
-    })
-}
-
-/// Overlay menu: saves settings and custom.css, then applies them.
-#[tauri::command]
-fn overlay_save<R: Runtime>(
-    app: AppHandle<R>,
-    settings: overlay::OverlayConfig,
-    custom_css: String,
-) -> Result<(), String> {
-    let dir = config_dir(&app)?;
-    overlay::save_user_css(&dir, &custom_css)?;
-    let mut config = Config::load_or_init(&dir);
-    config.overlay = settings;
-    config.save(&dir)?;
-    reload_overlay(&app);
-    Ok(())
-}
-
-/// Overlay menu: switches an existing mod on or off, then applies.
-#[tauri::command]
-fn overlay_toggle_mod<R: Runtime>(
-    app: AppHandle<R>,
-    file: String,
-    enabled: bool,
-) -> Result<(), String> {
-    overlay::set_mod_enabled(&config_dir(&app)?, &file, enabled)?;
-    reload_overlay(&app);
-    Ok(())
-}
-
-/// Overlay menu: opens the folder with config.json, custom.css and mods/.
-#[tauri::command]
-fn overlay_open_folder<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    let dir = config_dir(&app)?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn overlay_devtools<R: Runtime>(window: WebviewWindow<R>) {
-    window.open_devtools();
 }
 
 /// Called by the Linux link shim for `target=_blank` links.
@@ -208,6 +109,7 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
+    menu::hide_panel(app);
     if let Some(window) = app.get_webview_window(MAIN) {
         let _ = window.hide();
         set_low_memory(&window, true);
@@ -310,12 +212,11 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
                 Route::Block => NewWindowResponse::Deny,
             })
             .on_document_title_changed(|window, title| update_unread(&window, &title))
-            // The initialization script carries the stylesheet from startup;
-            // re-apply after each load so a reloaded overlay survives
-            // navigation.
+            // The initialization scripts carry the overlay from startup;
+            // re-apply after each load so live changes survive navigation.
             .on_page_load(|window, payload| {
                 if payload.event() == PageLoadEvent::Finished {
-                    apply_overlay(&window);
+                    menu::apply_on_load(&window);
                 }
             })
             .zoom_hotkeys_enabled(true)
@@ -330,11 +231,13 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
     if !overlay_css.is_empty() {
         builder = builder.initialization_script(overlay::apply_script(&overlay_css));
     }
+    // Theme engine with the startup accent, so Teams never flashes purple.
     builder = builder.initialization_script(format!(
-        "window.__leanPanelButton = {};\n{}",
-        overlay_settings.panel_button,
-        include_str!("panel.js")
+        "{}\n{}",
+        include_str!("theme.js"),
+        overlay::theme_script(&overlay_settings)
     ));
+    builder = builder.initialization_script(include_str!("lt-button.js"));
     #[cfg(target_os = "linux")]
     {
         builder = builder.initialization_script(include_str!("link-shim.js"));
@@ -484,12 +387,10 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
                 }
             }
-            "overlay-reload" => reload_overlay(app),
+            "overlay-reload" => menu::reload(app),
             "overlay-menu" => {
-                if let Some(w) = app.get_webview_window(MAIN) {
-                    show_main(app);
-                    let _ = w.eval("window.__leanPanel && window.__leanPanel.toggle();");
-                }
+                show_main(app);
+                menu::toggle_panel(app);
             }
             "devtools" => {
                 if let Some(w) = app.get_webview_window(MAIN) {
@@ -559,6 +460,7 @@ fn main() {
                 .open_js_links_on_click(false)
                 .build(),
         )
+        .plugin(menu::shortcut_plugin())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_ARG]),
@@ -566,11 +468,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             notify,
             open_link,
-            overlay_state,
-            overlay_save,
-            overlay_toggle_mod,
-            overlay_open_folder,
-            overlay_devtools
+            menu::overlay_state,
+            menu::overlay_update,
+            menu::overlay_toggle_mod,
+            menu::overlay_open_folder,
+            menu::overlay_devtools,
+            menu::overlay_menu_toggle,
+            menu::overlay_button_visible
         ])
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
@@ -582,6 +486,7 @@ fn main() {
             });
             build_tray(app.handle())?;
             build_main_window(app.handle(), start_hidden)?;
+            menu::maybe_selftest(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -602,6 +507,9 @@ fn main() {
                     if *focused {
                         set_low_memory(&webview, false);
                     }
+                    menu::set_shortcut_active(window.app_handle(), *focused);
+                    // Focus moving into the overlay menu is not "away".
+                    let away = !*focused && !menu::panel_visible(window.app_handle());
                     let blur = window
                         .state::<AppState>()
                         .overlay
@@ -610,7 +518,7 @@ fn main() {
                         .settings
                         .privacy_blur;
                     if blur {
-                        let _ = webview.eval(overlay::blur_script(!*focused));
+                        let _ = webview.eval(overlay::blur_script(away));
                     }
                 }
                 WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {

@@ -86,8 +86,12 @@ document.documentElement.setAttribute("data-lean-mod-loaded", new Date().toISOSt
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OverlayConfig {
-    /// Accent color as "#RRGGBB" or "#RGB"; replaces Teams' purple.
+    /// Accent color as "#RRGGBB" or "#RGB"; replaces Teams' purple
+    /// everywhere (see theme.js).
     pub accent_color: Option<String>,
+    /// How much neutral backgrounds and borders are tinted toward the
+    /// accent, 0.0 to 0.4.
+    pub tint: f64,
     /// Page zoom, 0.5 to 2.0. Ctrl/Cmd +/- works too.
     pub zoom: f64,
     /// Blur the whole window while it is not focused (screen sharing,
@@ -108,6 +112,7 @@ impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
             accent_color: None,
+            tint: 0.0,
             zoom: 1.0,
             privacy_blur: false,
             custom_css: true,
@@ -119,6 +124,22 @@ impl Default for OverlayConfig {
 }
 
 impl OverlayConfig {
+    pub fn tint(&self) -> f64 {
+        if self.tint.is_finite() {
+            self.tint.clamp(0.0, 0.4)
+        } else {
+            0.0
+        }
+    }
+
+    /// The accent as "#rrggbb", if set and valid.
+    pub fn accent(&self) -> Option<String> {
+        self.accent_color
+            .as_deref()
+            .and_then(Rgb::parse)
+            .map(Rgb::css)
+    }
+
     pub fn zoom(&self) -> f64 {
         if self.zoom.is_finite() {
             self.zoom.clamp(0.5, 2.0)
@@ -416,17 +437,26 @@ pub fn save_user_css(dir: &Path, css: &str) -> Result<(), String> {
 #[derive(Debug, Clone, Default)]
 pub struct Overlay {
     pub settings: OverlayConfig,
+    pub user_css: String,
+    pub mods: Vec<Mod>,
     pub css: String,
     pub js: Vec<String>,
 }
 
 impl Overlay {
     pub fn load(dir: &Path, settings: OverlayConfig) -> Self {
-        let mods = load_mods(dir);
+        Self::build(settings, load_user_css(dir), load_mods(dir))
+    }
+
+    /// Rebuilds from in-memory parts; used for live preview while the user
+    /// drags a slider, without touching the disk.
+    pub fn build(settings: OverlayConfig, user_css: String, mods: Vec<Mod>) -> Self {
         Self {
-            css: build_css(&settings, &load_user_css(dir), &mods),
+            css: build_css(&settings, &user_css, &mods),
             js: mod_scripts(&settings, &mods),
             settings,
+            user_css,
+            mods,
         }
     }
 }
@@ -459,6 +489,17 @@ pub fn apply_script(css: &str) -> String {
   el.textContent = css;
 }})({css});"#
     )
+}
+
+/// JavaScript that hands accent and tint to the theme engine (theme.js).
+pub fn theme_script(config: &OverlayConfig) -> String {
+    let args = serde_json::json!({ "accent": config.accent(), "tint": config.tint() });
+    format!("window.__leanTheme && window.__leanTheme.set({args});")
+}
+
+/// JavaScript that shows or hides the "LT" button (lt-button.js).
+pub fn button_script(visible: bool) -> String {
+    format!("window.__leanButton && window.__leanButton.set({visible});")
 }
 
 /// JavaScript that turns the privacy blur on or off.
@@ -638,6 +679,24 @@ mod tests {
         assert_eq!(load_user_css(&dir), ".saved{}");
         assert!(save_user_css(&dir, &"x".repeat(MAX_CUSTOM_CSS_BYTES + 1)).is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn theme_script_passes_normalized_accent_and_tint() {
+        let config = OverlayConfig {
+            accent_color: Some(" #ABC ".into()),
+            tint: 0.9,
+            ..OverlayConfig::default()
+        };
+        assert_eq!(
+            theme_script(&config),
+            r##"window.__leanTheme && window.__leanTheme.set({"accent":"#aabbcc","tint":0.4});"##
+        );
+        let off = OverlayConfig {
+            accent_color: Some("red".into()),
+            ..OverlayConfig::default()
+        };
+        assert!(theme_script(&off).contains(r#""accent":null"#));
     }
 
     #[test]

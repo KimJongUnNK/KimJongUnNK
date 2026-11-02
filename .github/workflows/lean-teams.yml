@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev xvfb
       - name: Check measure.ps1 syntax
         if: runner.os == 'Windows'
         shell: pwsh
@@ -73,6 +73,12 @@ jobs:
           if ($errors) { $errors; exit 1 }
       - name: Build
         run: npx --yes @tauri-apps/cli@2.12.4 build ${{ matrix.args }}
+      - name: Linux overlay menu self-test (WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          LEAN_TEAMS_SELFTEST="$PWD/selftest.json" timeout 90 xvfb-run -a src-tauri/target/release/lean-teams
+          cat selftest.json; echo
+          grep -Eq 'rows\\?":([5-9]|[1-9][0-9])' selftest.json
       - name: Windows smoke test (launch, measure script)
         if: runner.os == 'Windows'
         shell: powershell
@@ -91,6 +97,14 @@ jobs:
           $out7
           if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
           Stop-Process -Id $proc.Id -Force
+          Start-Sleep -Seconds 2
+          # Overlay menu self-test: the app opens the menu window itself and
+          # reports what WebView2 rendered in it.
+          $env:LEAN_TEAMS_SELFTEST = "$PWD\selftest.json"
+          Start-Process -FilePath $exe -Wait
+          $result = Get-Content selftest.json -Raw
+          $result
+          if ($result -notmatch 'rows\\?":\s*([0-9]+)' -or [int]$Matches[1] -lt 5) { throw 'overlay menu did not render on Windows' }
       - name: macOS smoke test (signature, launch, measure script)
         if: runner.os == 'macOS'
         run: |
@@ -106,6 +120,11 @@ jobs:
           sudo SAMPLES=2 INTERVAL=1 bash scripts/measure-macos.sh | tee measure.txt
           grep -E "^Lean Teams +yes" measure.txt
           pkill -f "Lean Teams.app/Contents/MacOS/lean-teams" || true
+          sleep 2
+          # Overlay menu self-test in WKWebView.
+          LEAN_TEAMS_SELFTEST="$PWD/selftest.json" "$APP/Contents/MacOS/lean-teams"
+          cat selftest.json; echo
+          grep -Eq 'rows\\?":([5-9]|[1-9][0-9])' selftest.json
       - uses: actions/upload-artifact@v4
         with:
           name: lean-teams-${{ runner.os }}

@@ -4,10 +4,12 @@ fn main() {
             "notify",
             "open_link",
             "overlay_state",
-            "overlay_save",
+            "overlay_update",
             "overlay_toggle_mod",
             "overlay_open_folder",
             "overlay_devtools",
+            "overlay_menu_toggle",
+            "overlay_button_visible",
         ]),
     ))
     .expect("failed to run tauri-build");
