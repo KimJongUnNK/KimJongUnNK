@@ -1,4 +1,10 @@
-# WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import
+# WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import (modifiziert)
+
+> [!WARNING]
+> **Inoffizielle, modifizierte Versionen.** Das sind **nicht** die Original-Apps von ArtCraft / storytold,
+> sondern von KimJongUnNK veränderte Builds (deutsche Rechtschreibung, Filmora-Import).
+> Originale: [WordCraft](https://github.com/storytold/wordcraft) · [DeckCraft](https://github.com/storytold/deckcraft) · [FilmCraft](https://github.com/storytold/filmcraft).
+> Fehler in diesen Versionen bitte **nicht** beim Original-Team melden.
 
 Rechtschreibprüfung auf **Deutsch** (DE / AT / CH) statt US-Englisch.
 
@@ -41,3 +47,6 @@ DeckCraft genauso (`DeckCraft.app`).
 ## Quellcode
 
 Patches: [`patches/`](patches) · Basis: [storytold/wordcraft](https://github.com/storytold/wordcraft), [storytold/deckcraft](https://github.com/storytold/deckcraft), [storytold/filmcraft](https://github.com/storytold/filmcraft) (MIT/Apache-2.0) · Wörterbücher: LibreOffice igerman98 (GPL, unverändert beigelegt)
+
+---
+*Modifizierte Versionen, kein offizielles ArtCraft-/storytold-Produkt.*

@@ -147,8 +147,8 @@ jobs:
                  crafts-deutsch/downloads/WordCraft-Deutsch-Windows-x64.zip crafts-deutsch/downloads/DeckCraft-Deutsch-Windows-x64.zip)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" --notes-file crafts-deutsch/RELEASE.md --title "WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import"
+            gh release edit "$TAG" --notes-file crafts-deutsch/RELEASE.md --title "Modifiziert: WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import (inoffiziell)"
           else
             gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --latest \
-              --title "WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import" --notes-file crafts-deutsch/RELEASE.md
+              --title "Modifiziert: WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import (inoffiziell)" --notes-file crafts-deutsch/RELEASE.md
           fi

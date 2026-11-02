@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Inoffizielle, modifizierte Versionen** – nicht die Original-Apps von ArtCraft / storytold. Verändert von KimJongUnNK (deutsche Rechtschreibung, Filmora-Import). Originale: [WordCraft](https://github.com/storytold/wordcraft) · [DeckCraft](https://github.com/storytold/deckcraft) · [FilmCraft](https://github.com/storytold/filmcraft). Fehler bitte nicht beim Original-Team melden.
+
 Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt US-Englisch.
 
 ## Download
@@ -25,3 +28,6 @@ Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt U
 **FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Import* öffnen. Die Videos müssen am gleichen Ort liegen wie in Filmora.
 
 Die Wörterbücher sind dabei. Neue Dokumente sind automatisch in der Sprache deines Systems.
+
+---
+*Modifizierte Versionen, kein offizielles ArtCraft-/storytold-Produkt.*
