@@ -6,6 +6,7 @@ Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt U
 |---|---|---|
 | **WordCraft** (wie Word) | `WordCraft-Deutsch-macOS.zip` | `WordCraft-Deutsch-Windows-x64.zip` |
 | **DeckCraft** (wie PowerPoint) | `DeckCraft-Deutsch-macOS.zip` | `DeckCraft-Deutsch-Windows-x64.zip` |
+| **FilmCraft** (wie Premiere) – öffnet Filmora-Projekte | `FilmCraft-Deutsch-macOS.zip` | – |
 
 ## Mac
 
@@ -20,5 +21,7 @@ Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt U
 
 1. ZIP entpacken
 2. `wordcraft.exe` starten → bei Warnung: *Weitere Informationen → Trotzdem ausführen*
+
+**FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Import* öffnen. Die Videos müssen am gleichen Ort liegen wie in Filmora.
 
 Die Wörterbücher sind dabei. Neue Dokumente sind automatisch in der Sprache deines Systems.

@@ -1,5 +1,6 @@
-# Baut WordCraft und DeckCraft mit deutscher Rechtschreibung für macOS (Universal: Apple Silicon +
-# Intel) und veröffentlicht sie zusammen mit den Windows-ZIPs als ein GitHub-Release.
+# Baut WordCraft und DeckCraft mit deutscher Rechtschreibung und FilmCraft mit Filmora-Import für
+# macOS (Universal: Apple Silicon + Intel) und veröffentlicht sie zusammen mit den Windows-ZIPs als
+# ein GitHub-Release.
 name: crafts-deutsch
 
 on:
@@ -27,9 +28,18 @@ jobs:
           - app: wordcraft
             name: WordCraft
             sha: fd7f6621a1419c7c99f2293c9e99b1b7c4b87282
+            patch: wordcraft-deutsch.patch
+            dictionaries: true
           - app: deckcraft
             name: DeckCraft
             sha: 90058395b78be26bb7ea7b4914a9f113c28d979d
+            patch: deckcraft-deutsch.patch
+            dictionaries: true
+          - app: filmcraft
+            name: FilmCraft
+            sha: 68919ed87aa6a097a4d21414ec7c438883f5fe22
+            patch: filmcraft-filmora.patch
+            dictionaries: false
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       CARGO_TERM_COLOR: always
@@ -42,7 +52,7 @@ jobs:
           git remote add origin https://github.com/storytold/${{ matrix.app }}
           git fetch -q --depth 1 origin ${{ matrix.sha }}
           git checkout -q FETCH_HEAD
-          git -c user.name=build -c user.email=build@localhost am -q "$GITHUB_WORKSPACE/crafts-deutsch/patches/${{ matrix.app }}-deutsch.patch"
+          git -c user.name=build -c user.email=build@localhost am -q "$GITHUB_WORKSPACE/crafts-deutsch/patches/${{ matrix.patch }}"
           git log --oneline -2
 
       - name: Deutsche Oberfläche (craft-i18n)
@@ -66,6 +76,7 @@ jobs:
         run: cargo build --release --locked -p ${{ matrix.app }} --target aarch64-apple-darwin --target x86_64-apple-darwin
 
       - name: Deutsche Wörterbücher (LibreOffice, GPL)
+        if: matrix.dictionaries
         run: |
           mkdir dict
           base=https://raw.githubusercontent.com/LibreOffice/dictionaries/master/de
@@ -84,7 +95,7 @@ jobs:
             "src/target/aarch64-apple-darwin/release/$APPBIN" "src/target/x86_64-apple-darwin/release/$APPBIN"
           lipo -info "$APP/Contents/MacOS/$NAME"
           cp "src/assets/app-icon/$APPBIN.icns" "$APP/Contents/Resources/$NAME.icns"
-          cp dict/* "$APP/Contents/Resources/dictionaries/"
+          if [ -d dict ]; then cp dict/* "$APP/Contents/Resources/dictionaries/"; else rmdir "$APP/Contents/Resources/dictionaries"; fi
           sed -e "s/@VERSION@/$VERSION-de/g" -e "s/@SHORT_VERSION@/${VERSION%%-*}/g" -e "s/@BUILD_SHA@/${{ matrix.sha }}/g" \
             src/packaging/macos/Info.plist.in > "$APP/Contents/Info.plist"
           plutil -lint "$APP/Contents/Info.plist"
@@ -132,12 +143,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG=crafts-deutsch
-          files=(mac/WordCraft-Deutsch-macOS.zip mac/DeckCraft-Deutsch-macOS.zip
+          files=(mac/WordCraft-Deutsch-macOS.zip mac/DeckCraft-Deutsch-macOS.zip mac/FilmCraft-Deutsch-macOS.zip
                  crafts-deutsch/downloads/WordCraft-Deutsch-Windows-x64.zip crafts-deutsch/downloads/DeckCraft-Deutsch-Windows-x64.zip)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" --notes-file crafts-deutsch/RELEASE.md
+            gh release edit "$TAG" --notes-file crafts-deutsch/RELEASE.md --title "WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import"
           else
             gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --latest \
-              --title "WordCraft + DeckCraft auf Deutsch" --notes-file crafts-deutsch/RELEASE.md
+              --title "WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import" --notes-file crafts-deutsch/RELEASE.md
           fi

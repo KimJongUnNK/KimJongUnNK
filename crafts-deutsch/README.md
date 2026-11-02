@@ -1,4 +1,4 @@
-# WordCraft + DeckCraft auf Deutsch
+# WordCraft + DeckCraft auf Deutsch, FilmCraft mit Filmora-Import
 
 Rechtschreibprüfung auf **Deutsch** (DE / AT / CH) statt US-Englisch.
 
@@ -30,6 +30,14 @@ DeckCraft genauso (`DeckCraft.app`).
 - Sprache kommt automatisch vom System
 - Vorschläge mit Umlauten und ß (`Strasse` → `Straße`)
 
+## FilmCraft: Filmora-Projekte öffnen
+
+`FilmCraft.app` installieren wie oben, dann **File › Import** → deine `.wfp` wählen.
+
+- Kommt mit: Clips, Schnitte, Spuren, Speed, Bilder, Titel (als editierbarer Text), Position/Größe/Drehung, Lautstärke, Fades, Übergänge
+- Kommt nicht mit (wird beim Import aufgelistet): Filmora-Effekte, Farbkorrektur, Masken, Pan & Zoom, KI-Funktionen
+- Videos müssen am gleichen Ort liegen wie in Filmora (sonst *Medien verknüpfen*)
+
 ## Quellcode
 
-Patches: [`patches/`](patches) · Basis: [storytold/wordcraft](https://github.com/storytold/wordcraft), [storytold/deckcraft](https://github.com/storytold/deckcraft) (MIT/Apache-2.0) · Wörterbücher: LibreOffice igerman98 (GPL, unverändert beigelegt)
+Patches: [`patches/`](patches) · Basis: [storytold/wordcraft](https://github.com/storytold/wordcraft), [storytold/deckcraft](https://github.com/storytold/deckcraft), [storytold/filmcraft](https://github.com/storytold/filmcraft) (MIT/Apache-2.0) · Wörterbücher: LibreOffice igerman98 (GPL, unverändert beigelegt)

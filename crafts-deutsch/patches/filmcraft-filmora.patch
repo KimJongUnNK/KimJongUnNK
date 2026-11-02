@@ -1,0 +1,1221 @@
+From 3724212b30463230f0ebb9ad20bb5da6d160ff35 Mon Sep 17 00:00:00 2001
+From: Emil Boenke <boenkeemil@gmail.com>
+Date: Mon, 2 Nov 2026 19:00:40 +0000
+Subject: [PATCH] Import Wondershare Filmora projects (.wfp)
+
+File > Import (and the Media Browser, and drag and drop) read Filmora 9+
+projects: a ZIP whose timeline.wesproj is JSON in 100 ns units.
+
+- every track in stacking order; video and audio clips with source in/out,
+  placement, constant speed and reverse; video and audio of one source linked
+- stills (Filmora's 3600 s source start) at source time zero
+- titles (a text clip in a compound clip) as graphic clips with a text layer:
+  text, font, size, colour, alignment and position
+- other compound clips as nested sequences; self-containing ones refused
+- Transform to Motion (position, scale, rotation), clip volume and mute, audio
+  fades, transitions with their range
+- effects, colour adjustments, masks, pan-and-zoom, speed ramps and AI
+  features go to the import report
+- minimal bounded ZIP reader (stored and deflate via miniz_oxide)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ Cargo.lock                                |   1 +
+ crates/engine/src/filmora_import_tests.rs |  82 ++
+ crates/engine/src/interchange.rs          |   5 +-
+ crates/engine/src/lib.rs                  |   2 +
+ crates/engine/src/media_browser.rs        |   2 +-
+ crates/interchange/Cargo.toml             |   2 +
+ crates/interchange/src/filmora.rs         | 895 ++++++++++++++++++++++
+ crates/interchange/src/lib.rs             |  22 +-
+ crates/ui-egui/src/app/files.rs           |   2 +-
+ docs/file-format-parity.md                |   1 +
+ 10 files changed, 1008 insertions(+), 6 deletions(-)
+ create mode 100644 crates/engine/src/filmora_import_tests.rs
+ create mode 100644 crates/interchange/src/filmora.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 5be8eae..cbb010e 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2243,6 +2243,7 @@ dependencies = [
+  "filmcraft-media",
+  "filmcraft-project",
+  "filmcraft-time",
++ "miniz_oxide 0.8.9",
+  "proptest",
+  "roxmltree",
+  "serde",
+diff --git a/crates/engine/src/filmora_import_tests.rs b/crates/engine/src/filmora_import_tests.rs
+new file mode 100644
+index 0000000..ec2cb67
+--- /dev/null
++++ b/crates/engine/src/filmora_import_tests.rs
+@@ -0,0 +1,82 @@
++//! Wondershare Filmora projects (`.wfp`) import through `file.import` like the other interchange
++//! documents: the sequence, its clips and titles arrive, and media that exists on disk is linked.
++
++use filmcraft_project::{ItemId, ItemKind, MediaRef};
++use serde_json::json;
++
++use crate::Session;
++use crate::media_test_util::{make_movie, tmp_dir};
++
++/// A stored (uncompressed) ZIP of `files`.
++fn zip(files: &[(&str, String)]) -> Vec<u8> {
++    let (mut out, mut central) = (Vec::new(), Vec::new());
++    for (name, data) in files {
++        let local = out.len() as u32;
++        let len = (data.len() as u32).to_le_bytes();
++        out.extend_from_slice(b"PK\x03\x04\x14\0\0\0\0\0\0\0\0\0\0\0\0\0");
++        out.extend_from_slice(&len);
++        out.extend_from_slice(&len);
++        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
++        out.extend_from_slice(&[0, 0]);
++        out.extend_from_slice(name.as_bytes());
++        out.extend_from_slice(data.as_bytes());
++        central.extend_from_slice(b"PK\x01\x02\x14\0\x14\0\0\0\0\0\0\0\0\0\0\0\0\0");
++        central.extend_from_slice(&len);
++        central.extend_from_slice(&len);
++        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
++        central.extend_from_slice(&[0; 12]);
++        central.extend_from_slice(&local.to_le_bytes());
++        central.extend_from_slice(name.as_bytes());
++    }
++    let (cd, n) = (out.len() as u32, (files.len() as u16).to_le_bytes());
++    out.extend_from_slice(&central);
++    out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
++    out.extend_from_slice(&n);
++    out.extend_from_slice(&n);
++    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
++    out.extend_from_slice(&cd.to_le_bytes());
++    out.extend_from_slice(&[0, 0]);
++    out
++}
++
++#[test]
++fn a_filmora_project_imports_with_its_clips_titles_and_media() {
++    let d = tmp_dir("filmora");
++    let movie = d.join("shot.mov");
++    make_movie(&movie, filmcraft_media::DemoScene::OceanSunset, 64, 36, 24);
++    // Filmora for Mac writes `file://` and the path without its root slash.
++    let url = format!("file:/{}", movie.to_string_lossy());
++    let title = serde_json::to_string(
++        &json!({"Text": "Aufwärmen an der Bar", "PosX": 0.5, "PosY": 0.8, "TextData": [{"Basic": {"FontName": "Arial", "FontSize": 80.0}}]}).to_string(),
++    )
++    .unwrap();
++    let timeline = format!(
++        r#"{{"currentTimelineId":1,"timelineInfos":[
++          {{"timelineId":1,"frameRate":{{"num":25,"den":1}},"resolutionWidth":1080,"resolutionHeight":1920,"trackInfos":[
++            {{"trackType":2,"trackTag":1,"clipList":[{{"type":2,"filename":"{url}","sourceUuid":"s","inPoint":0,"outPoint":5000000,"tlBegin":0,"tlEnd":5000000}}]}},
++            {{"trackType":1,"trackTag":2,"clipList":[{{"type":1,"filename":"{url}","sourceUuid":"s","inPoint":0,"outPoint":5000000,"tlBegin":0,"tlEnd":5000000}}]}},
++            {{"trackType":1,"trackTag":4,"clipList":[{{"type":7,"timelineId":2,"inPoint":0,"outPoint":5000000,"tlBegin":0,"tlEnd":5000000}}]}}]}},
++          {{"timelineId":2,"trackInfos":[{{"trackType":1,"clipList":[{{"type":4,"tlBegin":0,"tlEnd":5000000,"scriptBuf":{title}}}]}}]}}]}}"#
++    );
++    let wfp = d.join("Reel.wfp");
++    let info = r#"{"project_file_name":"Reel","timeline_mediaId":"M"}"#.to_string();
++    std::fs::write(&wfp, zip(&[("ProjectFolder/project_info.json", info), ("ProjectFolder/Medias/M/timeline.wesproj", timeline)])).unwrap();
++
++    let mut s = Session::default();
++    let r = s.execute("file.import", json!({"paths": [wfp.to_string_lossy()]})).unwrap();
++    let seqs: Vec<ItemId> = r["sequences"].as_array().unwrap().iter().filter_map(|v| v.as_u64()).map(ItemId).collect();
++    assert_eq!(seqs.len(), 1, "{r}");
++    let seq = s.project.sequence(seqs[0]).unwrap();
++    assert_eq!((seq.settings.width, seq.settings.height), (1080, 1920));
++    let v1 = &seq.video_tracks[0].items[0];
++    assert_eq!(v1.duration, filmcraft_time::Tick::from_seconds_f64(0.5));
++    assert_eq!(v1.link, seq.audio_tracks[0].items[0].link);
++    let media = s.project.item(v1.item).and_then(|i| i.as_media()).unwrap();
++    assert!(matches!(&media.media, MediaRef::File { path } if path == &movie.to_string_lossy()), "{:?}", media.media);
++    // The title is a graphic clip with its text.
++    let title = &seq.video_tracks[1].items[0];
++    assert!(matches!(s.project.item(title.item).unwrap().kind, ItemKind::Graphic { .. }));
++    let text = title.effects.iter().find(|e| filmcraft_project::graphic::is_layer(e)).unwrap();
++    assert_eq!(text.params["text"].value, filmcraft_project::ParamValue::Text("Aufwärmen an der Bar".into()));
++    let _ = std::fs::remove_dir_all(&d);
++}
+diff --git a/crates/engine/src/interchange.rs b/crates/engine/src/interchange.rs
+index 7e97f59..0d0db55 100644
+--- a/crates/engine/src/interchange.rs
++++ b/crates/engine/src/interchange.rs
+@@ -1,4 +1,5 @@
+-//! Interchange documents (CMX 3600 EDL, FCP7 XML, FCPXML, OTIO, AAF, OMF) ↔ the session's project.
++//! Interchange documents (CMX 3600 EDL, FCP7 XML, FCPXML, OTIO, AAF, OMF; Filmora projects, import
++//! only) ↔ the session's project.
+ 
+ use serde_json::{Value, json};
+ 
+@@ -9,7 +10,7 @@ use crate::{EngineError, Result, Session};
+ 
+ /// File extensions of the interchange documents `file.import` reads (lower case). The Media
+ /// Browser lists the same set.
+-pub const EXTENSIONS: [&str; 7] = ["edl", "xml", "fcpxml", "otio", "aaf", "omf", "omfi"];
++pub const EXTENSIONS: [&str; 8] = ["edl", "xml", "fcpxml", "otio", "aaf", "omf", "omfi", "wfp"];
+ 
+ /// The interchange format of a file, if it is one (by content, with the extension as a hint).
+ pub fn detect(path: &str, bytes: &[u8]) -> Option<Format> {
+diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
+index 56d05b7..3a29bdf 100644
+--- a/crates/engine/src/lib.rs
++++ b/crates/engine/src/lib.rs
+@@ -1362,6 +1362,8 @@ mod export_tests;
+ #[cfg(test)]
+ mod file_tests;
+ #[cfg(test)]
++mod filmora_import_tests;
++#[cfg(test)]
+ mod gap_selection_tests;
+ #[cfg(test)]
+ mod history_tests;
+diff --git a/crates/engine/src/media_browser.rs b/crates/engine/src/media_browser.rs
+index 6fdda50..280ee6f 100644
+--- a/crates/engine/src/media_browser.rs
++++ b/crates/engine/src/media_browser.rs
+@@ -78,7 +78,7 @@ pub const DEFAULT_COLUMNS: [&str; 5] = ["Name", "Frame Rate", "Media Duration",
+ /// interchange document `file.import` reads ([`crate::interchange::EXTENSIONS`], AAF and OMF
+ /// included). Avid Log Exchange (`.ale`) is left out: FilmCraft writes it (File ▸ Export) but,
+ /// like Premiere, does not read it (#1292).
+-const PROJECT_EXTENSIONS: [&str; 8] = ["fcproj", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "omfi"];
++const PROJECT_EXTENSIONS: [&str; 9] = ["fcproj", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "omfi", "wfp"];
+ const CAPTION_EXTENSIONS: [&str; 3] = ["srt", "vtt", "scc"];
+ const RECENT_MAX: usize = 10;
+ 
+diff --git a/crates/interchange/Cargo.toml b/crates/interchange/Cargo.toml
+index 3eecc49..78156e8 100644
+--- a/crates/interchange/Cargo.toml
++++ b/crates/interchange/Cargo.toml
+@@ -20,6 +20,8 @@ serde = { workspace = true }
+ serde_json = { workspace = true }
+ thiserror = { workspace = true }
+ roxmltree = { workspace = true }
++# Filmora projects are ZIP archives (deflate).
++miniz_oxide = "0.8"
+ 
+ [dev-dependencies]
+ proptest = { workspace = true }
+diff --git a/crates/interchange/src/filmora.rs b/crates/interchange/src/filmora.rs
+new file mode 100644
+index 0000000..309d372
+--- /dev/null
++++ b/crates/interchange/src/filmora.rs
+@@ -0,0 +1,895 @@
++//! Wondershare Filmora projects (`.wfp`, Filmora 9 and later), import only.
++//!
++//! A `.wfp` is a ZIP archive. `ProjectFolder/project_info.json` names the timeline's media id
++//! (`timeline_mediaId`); `ProjectFolder/Medias/<id>/timeline.wesproj` is the edit as JSON. Media
++//! is referenced by path (`file://…`), never embedded. The format was worked out from projects the
++//! user saved in Filmora 16 (black-box observation of our own files; no Filmora code was read).
++//!
++//! What maps:
++//! - every timeline (`timelineInfos`): the current one becomes the imported sequence, the others
++//!   nested sequences when a compound clip (type 7) uses them;
++//! - tracks (`trackType` 1 video, 2 audio) in their stacking order, clips (type 1 video, type 2
++//!   audio) with source in/out, timeline placement, constant speed and reverse; video and audio of
++//!   the same source at the same place are linked;
++//! - stills (Filmora places them at 3600 s of source time) start at source time zero;
++//! - titles (type 4, alone in a compound clip, as Filmora wraps them) become graphic clips with a
++//!   text layer: text, font, size, colour and position;
++//! - Transform (position, scale, rotation) to Motion; clip volume (dB) and mute; audio fades and
++//!   transitions (`postTransition` / `preTransition`) with their range.
++//!
++//! What is reported instead: Filmora effects, colour adjustments, masks, pan-and-zoom, keyframed
++//! speed and the AI features, which have no FilmCraft counterpart or cannot be read reliably.
++//!
++//! Time is in units of 100 ns (`10_000_000` per second); it maps onto ticks rounded to the nearest.
++
++use std::collections::{HashMap, HashSet};
++
++use filmcraft_geom::Vec2;
++use filmcraft_project::{
++    ClipId, EffectInstance, ItemId, ItemKind, Label, Param, ParamValue, Sequence, TrackItem, TrackKind, Transition, TransitionAlign, TransitionId, graphic,
++};
++use filmcraft_time::{FrameRate, TICKS_PER_SECOND, Tick};
++use serde_json::Value;
++
++use crate::common::{Builder, MediaSpec, empty_sequence, file_name, file_stem, kind_from_ext, settings_for, transition_effect};
++use crate::{Error, Format, ImportOptions, Imported, Report, Result};
++
++/// Filmora's time unit: 100 ns.
++const UNITS_PER_SECOND: i128 = 10_000_000;
++/// Filmora puts stills at this source time (one hour).
++const STILL_SOURCE_START: i64 = 3600 * 10_000_000;
++/// Largest archive member read (the timeline of a long project is a few MB).
++const MAX_MEMBER: usize = 64 << 20;
++/// Most central-directory entries walked (a project holds a few hundred thumbnails at most).
++const MAX_ENTRIES: usize = 100_000;
++/// How deep compound clips may nest (cycles are refused as well).
++const MAX_NESTING: usize = 16;
++
++/// Does `bytes` look like a Filmora project: a ZIP whose central directory holds
++/// `ProjectFolder/project_info.json`?
++pub(crate) fn sniff(bytes: &[u8]) -> bool {
++    bytes.starts_with(b"PK\x03\x04") && Zip::open(bytes).is_some_and(|z| z.find("ProjectFolder/project_info.json").is_some())
++}
++
++/// Filmora time to ticks, rounded to the nearest tick.
++fn ticks(units: i64) -> Tick {
++    let t = (units as i128 * TICKS_PER_SECOND as i128 + UNITS_PER_SECOND / 2).div_euclid(UNITS_PER_SECOND);
++    Tick(t.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
++}
++
++// ---------------------------------------------------------------------------------------------
++// A minimal ZIP reader: stored and deflated members, found through the central directory.
++// ---------------------------------------------------------------------------------------------
++
++struct ZipEntry {
++    name: String,
++    method: u16,
++    compressed: usize,
++    size: usize,
++    local: usize,
++}
++
++struct Zip<'a> {
++    bytes: &'a [u8],
++    entries: Vec<ZipEntry>,
++}
++
++fn u16_at(b: &[u8], i: usize) -> Option<u16> {
++    Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?))
++}
++
++fn u32_at(b: &[u8], i: usize) -> Option<u32> {
++    Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?))
++}
++
++impl<'a> Zip<'a> {
++    fn open(bytes: &'a [u8]) -> Option<Zip<'a>> {
++        // End of central directory: the last `PK\5\6` within the final 64 KiB + 22 bytes.
++        let from = bytes.len().saturating_sub(0xFFFF + 22);
++        let eocd = (from..bytes.len().saturating_sub(21)).rev().find(|&i| bytes.get(i..i + 4) == Some(b"PK\x05\x06"))?;
++        let count = u16_at(bytes, eocd + 10)? as usize;
++        let mut at = u32_at(bytes, eocd + 16)? as usize;
++        let mut entries = Vec::new();
++        for _ in 0..count.min(MAX_ENTRIES) {
++            if bytes.get(at..at + 4) != Some(b"PK\x01\x02") {
++                break;
++            }
++            let method = u16_at(bytes, at + 10)?;
++            let compressed = u32_at(bytes, at + 20)? as usize;
++            let size = u32_at(bytes, at + 24)? as usize;
++            let name_len = u16_at(bytes, at + 28)? as usize;
++            let extra_len = u16_at(bytes, at + 30)? as usize;
++            let comment_len = u16_at(bytes, at + 32)? as usize;
++            let local = u32_at(bytes, at + 42)? as usize;
++            let name = String::from_utf8_lossy(bytes.get(at + 46..at + 46 + name_len)?).into_owned();
++            entries.push(ZipEntry { name, method, compressed, size, local });
++            at = at.checked_add(46 + name_len + extra_len + comment_len)?;
++        }
++        Some(Zip { bytes, entries })
++    }
++
++    fn find(&self, name: &str) -> Option<&ZipEntry> {
++        self.entries.iter().find(|e| e.name == name)
++    }
++
++    fn read(&self, e: &ZipEntry) -> std::result::Result<Vec<u8>, String> {
++        if e.size > MAX_MEMBER || e.compressed > MAX_MEMBER {
++            return Err(format!("{} is too large", e.name));
++        }
++        let b = self.bytes;
++        let bad = || format!("{} is damaged", e.name);
++        if b.get(e.local..e.local + 4) != Some(b"PK\x03\x04") {
++            return Err(bad());
++        }
++        let name_len = u16_at(b, e.local + 26).ok_or_else(bad)? as usize;
++        let extra_len = u16_at(b, e.local + 28).ok_or_else(bad)? as usize;
++        let start = e.local + 30 + name_len + extra_len;
++        let data = b.get(start..start + e.compressed).ok_or_else(bad)?;
++        match e.method {
++            0 => Ok(data.to_vec()),
++            8 => miniz_oxide::inflate::decompress_to_vec_with_limit(data, MAX_MEMBER).map_err(|_| bad()),
++            m => Err(format!("{} uses compression method {m}", e.name)),
++        }
++    }
++
++    fn json(&self, name: &str) -> Result<Value> {
++        let e = self.find(name).ok_or_else(|| Error::parse(Format::Filmora, format!("no {name} in the project")))?;
++        let bytes = self.read(e).map_err(|m| Error::parse(Format::Filmora, m))?;
++        let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes)).into_owned();
++        serde_json::from_str(&text).map_err(|e| Error::parse(Format::Filmora, format!("{name}: {e}")))
++    }
++}
++
++// ---------------------------------------------------------------------------------------------
++// Import
++// ---------------------------------------------------------------------------------------------
++
++pub(crate) fn import(bytes: &[u8], opts: &ImportOptions, report: &mut Report) -> Result<Imported> {
++    let zip = Zip::open(bytes).ok_or_else(|| Error::parse(Format::Filmora, "not a ZIP archive"))?;
++    let info = zip.json("ProjectFolder/project_info.json")?;
++    let media_id = info.get("timeline_mediaId").and_then(Value::as_str).unwrap_or("");
++    let timeline_path = format!("ProjectFolder/Medias/{media_id}/timeline.wesproj");
++    let timeline_path = if zip.find(&timeline_path).is_some() {
++        timeline_path
++    } else {
++        // Older saves: whichever timeline the archive has.
++        zip.entries
++            .iter()
++            .map(|e| e.name.clone())
++            .find(|n| n.ends_with("/timeline.wesproj"))
++            .ok_or_else(|| Error::parse(Format::Filmora, "no timeline in the project"))?
++    };
++    let doc = zip.json(&timeline_path)?;
++    let name = opts
++        .name
++        .clone()
++        .or_else(|| info.get("project_file_name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string))
++        .unwrap_or_else(|| "Filmora Project".into());
++    let timelines: HashMap<i64, &Value> =
++        doc.get("timelineInfos").and_then(Value::as_array).into_iter().flatten().filter_map(|t| Some((t.get("timelineId")?.as_i64()?, t))).collect();
++    let current = doc
++        .get("currentTimelineId")
++        .and_then(Value::as_i64)
++        .filter(|id| timelines.contains_key(id))
++        .or_else(|| doc.get("timelineInfos").and_then(Value::as_array).and_then(|a| a.first()).and_then(|t| t.get("timelineId")).and_then(Value::as_i64));
++    let Some(current) = current else { return Err(Error::parse(Format::Filmora, "the project has no timeline")) };
++    let mut imp = Imp {
++        b: Builder::new(&name),
++        report,
++        timelines,
++        nested: HashMap::new(),
++        building: HashSet::new(),
++        links: HashMap::new(),
++        pairs: HashSet::new(),
++        ignored: Vec::new(),
++    };
++    let id = imp.timeline(current, &name, 0).ok_or_else(|| Error::parse(Format::Filmora, "the timeline could not be read"))?;
++    imp.b.top.push(id);
++    let mut ignored = std::mem::take(&mut imp.ignored);
++    ignored.sort();
++    ignored.dedup();
++    for what in ignored {
++        imp.report.warn(format!("Filmora {what} were not imported (no FilmCraft equivalent)"));
++    }
++    Ok(imp.b.finish())
++}
++
++struct Imp<'v, 'r> {
++    b: Builder,
++    report: &'r mut Report,
++    timelines: HashMap<i64, &'v Value>,
++    /// Compound clips' timelines already imported, as sequence items.
++    nested: HashMap<i64, ItemId>,
++    /// Timelines being imported (a compound clip that contains itself is refused).
++    building: HashSet<i64>,
++    /// (source, timeline start, timeline end) → link id, for video and audio of one clip.
++    links: HashMap<(String, i64, i64), u64>,
++    /// The (source, start, end) keys a video and an audio clip share: only those are linked.
++    pairs: HashSet<(String, i64, i64)>,
++    /// What was skipped, reported once each.
++    ignored: Vec<String>,
++}
++
++/// One clip as read, before it becomes a track item.
++struct Placed {
++    item: TrackItem,
++    /// Filmora's `postTransition` / `preTransition`, if any.
++    transitions: Vec<(String, Tick, Tick)>,
++    fades: (Option<Tick>, Option<Tick>),
++}
++
++fn i(v: &Value, k: &str) -> i64 {
++    v.get(k).and_then(Value::as_i64).unwrap_or(0)
++}
++
++fn rate_of(t: &Value) -> FrameRate {
++    let r = t.get("frameRate");
++    let num = r.and_then(|r| r.get("num")).and_then(Value::as_i64).unwrap_or(25);
++    let den = r.and_then(|r| r.get("den")).and_then(Value::as_i64).unwrap_or(1);
++    if num > 0 && den > 0 && num / den <= 1000 { FrameRate { num, den } } else { FrameRate { num: 25, den: 1 } }
++}
++
++/// `file://Volumes/x.mov` (Filmora for Mac leaves out the root slash), `file:///Users/…`,
++/// `file:///C:/…` → a local path.
++fn path_of(url: &str) -> String {
++    let Some(rest) = url.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")).and(url.get(7..)) else { return url.to_string() };
++    // Not a host: Filmora writes the path right after `file://`.
++    let rooted = if rest.starts_with('/') { rest.to_string() } else { format!("/{rest}") };
++    crate::common::file_url_to_path(&format!("file://{rooted}"))
++}
++
++/// The effect-list entries (`display`, parameters) of a clip's effect chain `chain`.
++fn effects<'v>(c: &'v Value, chain: &str) -> impl Iterator<Item = &'v Value> + 'v {
++    let chain = chain.to_string();
++    c.get("effectChainList")
++        .and_then(Value::as_array)
++        .into_iter()
++        .flatten()
++        .filter(move |e| e.get("name").and_then(Value::as_str) == Some(chain.as_str()))
++        .flat_map(|e| e.get("effectList").and_then(Value::as_array).into_iter().flatten())
++}
++
++fn display(e: &Value) -> &str {
++    e.get("display").and_then(Value::as_str).unwrap_or("")
++}
++
++/// A parameter of an effect-list entry, as a number (`fxParam.unValue`).
++fn num(e: &Value, name: &str) -> Option<f64> {
++    e.get("paramList")?.as_array()?.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name))?.get("fxParam")?.get("unValue")?.as_f64()
++}
++
++fn flag(e: &Value, name: &str) -> Option<bool> {
++    let v = e.get("paramList")?.as_array()?.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name))?.get("fxParam")?.get("unValue")?.clone();
++    v.as_bool().or_else(|| v.as_i64().map(|n| n != 0))
++}
++
++/// Constant speed and reverse from `speed.speedParam`; `None` speed for a ramp.
++fn speed_of(c: &Value) -> (Option<f64>, bool) {
++    let s = c.get("speed");
++    let reverse = s.and_then(|s| s.get("reverse")).and_then(Value::as_bool).unwrap_or(false);
++    let Some(param) = s.and_then(|s| s.get("speedParam")).and_then(Value::as_str) else { return (Some(1.0), reverse) };
++    let Ok(p) = serde_json::from_str::<Value>(param) else { return (Some(1.0), reverse) };
++    let values: Vec<f64> =
++        p.get("keyframeSets").and_then(Value::as_array).into_iter().flatten().filter_map(|k| k.get("_value").and_then(Value::as_f64)).collect();
++    match values.first() {
++        None => (Some(1.0), reverse),
++        Some(&v) if values.iter().all(|x| (x - v).abs() < 1e-6) && v > 0.0 && v.is_finite() => (Some(v), reverse),
++        _ => (None, reverse),
++    }
++}
++
++fn set(ti: &mut TrackItem, effect: &str, param: &str, v: ParamValue) {
++    crate::common::set_param(ti, effect, param, Param::new(v));
++}
++
++impl Imp<'_, '_> {
++    fn skip(&mut self, what: &str) {
++        self.ignored.push(what.to_string());
++    }
++
++    /// Import timeline `id` as a sequence item (the top one, or a compound clip's).
++    fn timeline(&mut self, id: i64, name: &str, depth: usize) -> Option<ItemId> {
++        // A timeline still being built is an ancestor: using it would nest a sequence in itself.
++        if depth > MAX_NESTING || self.building.contains(&id) {
++            self.report.warn("a Filmora compound clip that contains itself was skipped");
++            return None;
++        }
++        if let Some(&done) = self.nested.get(&id) {
++            return Some(done);
++        }
++        self.building.insert(id);
++        let t = *self.timelines.get(&id)?;
++        let rate = rate_of(t);
++        let (w, h) = (i(t, "resolutionWidth").clamp(16, 16384) as u32, i(t, "resolutionHeight").clamp(16, 16384) as u32);
++        let settings = settings_for(rate, w, h, false);
++        let item = self.b.reserve_sequence(name, settings.clone(), None);
++        self.nested.insert(id, item);
++        let mut seq = empty_sequence(settings);
++        let mut kinds: HashMap<(String, i64, i64), (bool, bool)> = HashMap::new();
++        for tr in t.get("trackInfos").and_then(Value::as_array).into_iter().flatten() {
++            for c in tr.get("clipList").and_then(Value::as_array).into_iter().flatten() {
++                let Some(src) = c.get("sourceUuid").and_then(Value::as_str).filter(|s| !s.is_empty()) else { continue };
++                let k = kinds.entry((src.to_string(), i(c, "tlBegin"), i(c, "tlEnd"))).or_default();
++                match i(c, "type") {
++                    1 => k.0 = true,
++                    2 => k.1 = true,
++                    _ => {}
++                }
++            }
++        }
++        self.pairs.extend(kinds.into_iter().filter(|(_, (v, a))| *v && *a).map(|(k, _)| k));
++        for tr in t.get("trackInfos").and_then(Value::as_array).into_iter().flatten() {
++            let kind = if i(tr, "trackType") == 2 { TrackKind::Audio } else { TrackKind::Video };
++            self.track(&mut seq, tr, kind, (w, h, rate), depth);
++        }
++        self.b.ensure_tracks(&mut seq, TrackKind::Video, 1);
++        self.b.ensure_tracks(&mut seq, TrackKind::Audio, 1);
++        self.b.put_sequence(item, seq);
++        self.building.remove(&id);
++        Some(item)
++    }
++
++    fn track(&mut self, seq: &mut Sequence, tr: &Value, kind: TrackKind, frame: (u32, u32, FrameRate), depth: usize) {
++        let index = seq.tracks(kind).len();
++        let mut track = self.b.track(kind, index);
++        let mut placed: Vec<Placed> = Vec::new();
++        for c in tr.get("clipList").and_then(Value::as_array).into_iter().flatten() {
++            if let Some(p) = self.clip(c, kind, frame, depth) {
++                placed.push(p);
++            }
++        }
++        placed.sort_by_key(|p| p.item.start);
++        // No overlaps on one track: a clip that starts inside the previous one is cut to fit.
++        for k in 1..placed.len() {
++            let prev_end = placed[k - 1].item.end();
++            let cur = &mut placed[k].item;
++            if cur.start < prev_end {
++                let cut = prev_end - cur.start;
++                if cut >= cur.duration {
++                    cur.duration = Tick::ZERO;
++                } else {
++                    cur.duration -= cut;
++                    cur.source_in += crate::common::scaled(cut, cur.speed);
++                    cur.start = prev_end;
++                }
++            }
++        }
++        placed.retain(|p| p.item.duration > Tick::ZERO);
++        let audio = kind == TrackKind::Audio;
++        let ids: Vec<(ClipId, Tick, Tick)> = placed.iter().map(|p| (p.item.id, p.item.start, p.item.end())).collect();
++        for (k, p) in placed.iter().enumerate() {
++            let (id, start, end) = ids[k];
++            let prev = k.checked_sub(1).map(|j| ids[j]).filter(|q| q.2 == start).map(|q| q.0);
++            let next = ids.get(k + 1).filter(|q| q.1 == end).map(|q| q.0);
++            for (name, t0, t1) in &p.transitions {
++                if t1 <= t0 {
++                    continue;
++                }
++                // Which cut the transition belongs to: the one it is nearer.
++                let at_end = (*t1 - end).0.abs() <= (*t0 - start).0.abs();
++                let (cut, from, to) = if at_end { (end, Some(id), next) } else { (start, prev, Some(id)) };
++                let align = if *t1 <= cut {
++                    TransitionAlign::EndAtCut
++                } else if *t0 >= cut {
++                    TransitionAlign::StartAtCut
++                } else {
++                    TransitionAlign::CenterAtCut
++                };
++                let effect = transition_effect(name, audio, self.report);
++                track.transitions.push(Transition {
++                    id: TransitionId(self.b.alloc()),
++                    effect,
++                    start: *t0,
++                    duration: *t1 - *t0,
++                    from,
++                    to,
++                    align,
++                    reverse: false,
++                });
++            }
++            if audio {
++                if let Some(d) = p.fades.0.filter(|d| *d > Tick::ZERO) {
++                    let effect = transition_effect("Cross Fade (+3dB)", true, self.report);
++                    track.transitions.push(Transition {
++                        id: TransitionId(self.b.alloc()),
++                        effect,
++                        start,
++                        duration: d.min(end - start),
++                        from: None,
++                        to: Some(id),
++                        align: TransitionAlign::StartAtCut,
++                        reverse: false,
++                    });
++                }
++                if let Some(d) = p.fades.1.filter(|d| *d > Tick::ZERO) {
++                    let d = d.min(end - start);
++                    let effect = transition_effect("Cross Fade (+3dB)", true, self.report);
++                    track.transitions.push(Transition {
++                        id: TransitionId(self.b.alloc()),
++                        effect,
++                        start: end - d,
++                        duration: d,
++                        from: Some(id),
++                        to: None,
++                        align: TransitionAlign::EndAtCut,
++                        reverse: false,
++                    });
++                }
++            }
++        }
++        track.items = placed.into_iter().map(|p| p.item).collect();
++        track.sort();
++        seq.tracks_mut(kind).push(track);
++    }
++
++    fn clip(&mut self, c: &Value, kind: TrackKind, frame: (u32, u32, FrameRate), depth: usize) -> Option<Placed> {
++        let ty = i(c, "type");
++        let (tl0, tl1) = (i(c, "tlBegin"), i(c, "tlEnd"));
++        if tl1 <= tl0 {
++            return None;
++        }
++        let (start, duration) = (ticks(tl0), ticks(tl1) - ticks(tl0));
++        let source = c.get("sourceUuid").and_then(Value::as_str).unwrap_or("").to_string();
++        let mut ti = match ty {
++            1 | 2 => {
++                let url = c.get("filename").and_then(Value::as_str).filter(|f| !f.is_empty())?;
++                let path = path_of(url);
++                let still = matches!(kind_from_ext(&path), filmcraft_media::MediaKind::Still);
++                let spec = MediaSpec {
++                    duration: None,
++                    video: (!matches!(kind_from_ext(&path), filmcraft_media::MediaKind::AudioOnly)).then_some(frame),
++                    audio: (kind == TrackKind::Audio || !still).then_some((48_000, 2)),
++                    start_tc: None,
++                    kind: Some(kind_from_ext(&path)),
++                };
++                let name = file_stem(&path).to_string();
++                let item = self.b.file_media(&format!("file:{path}"), file_name(&path), &path, &spec, None);
++                let in_point = i(c, "inPoint");
++                let source_in = if still { ticks((in_point - STILL_SOURCE_START).max(0)) } else { ticks(in_point.max(0)) };
++                let mut ti = self.b.clip(item, kind, &name, start, duration, source_in);
++                let (speed, reverse) = speed_of(c);
++                match speed {
++                    Some(s) => ti.speed = s,
++                    None => {
++                        // A ramp: keep the clip's average rate so it covers the same source.
++                        let src = ticks(i(c, "outPoint") - in_point);
++                        if duration > Tick::ZERO && src > Tick::ZERO {
++                            ti.speed = (src.0 as f64 / duration.0 as f64).clamp(0.01, 100.0);
++                        }
++                        self.report.warn("Filmora speed ramps were imported at their average speed");
++                    }
++                }
++                ti.reverse = reverse;
++                if !still && kind == TrackKind::Video {
++                    // Filmora fits footage to the frame.
++                    ti.scale_to_frame = true;
++                }
++                ti
++            }
++            7 => {
++                let nested_id = i(c, "timelineId");
++                if let Some(ti) = self.title(nested_id, kind, frame, start, duration) {
++                    ti
++                } else {
++                    let item = self.timeline(nested_id, "Compound Clip", depth + 1)?;
++                    self.b.clip(item, kind, "Compound Clip", start, duration, ticks(i(c, "inPoint").max(0)))
++                }
++            }
++            4 => self.text_clip(c, frame, start, duration)?,
++            other => {
++                self.skip(&format!("clips of type {other}"));
++                return None;
++            }
++        };
++        let key = (source, tl0, tl1);
++        if matches!(ty, 1 | 2) && self.pairs.contains(&key) {
++            let next = self.b.link_id();
++            ti.link = Some(*self.links.entry(key).or_insert(next));
++        }
++        let fades = self.adjust(&mut ti, c, kind, frame);
++        let transitions = ["postTransition", "preTransition"]
++            .iter()
++            .filter_map(|k| c.get(*k))
++            .filter_map(|t| {
++                let (a, b) = (i(t, "tlBegin"), i(t, "tlEnd"));
++                let name = t.get("display").and_then(Value::as_str).unwrap_or("Dissolve").to_string();
++                (b > a).then(|| (name, ticks(a), ticks(b)))
++            })
++            .collect();
++        Some(Placed { item: ti, transitions, fades })
++    }
++
++    /// A compound clip whose timeline holds one title (how Filmora stores titles) as a graphic clip.
++    fn title(&mut self, nested: i64, kind: TrackKind, frame: (u32, u32, FrameRate), start: Tick, duration: Tick) -> Option<TrackItem> {
++        if kind != TrackKind::Video {
++            return None;
++        }
++        let t = *self.timelines.get(&nested)?;
++        let clips: Vec<&Value> = t
++            .get("trackInfos")
++            .and_then(Value::as_array)
++            .into_iter()
++            .flatten()
++            .flat_map(|tr| tr.get("clipList").and_then(Value::as_array).into_iter().flatten())
++            .collect();
++        let [text] = clips.as_slice() else { return None };
++        if i(text, "type") != 4 {
++            return None;
++        }
++        self.text_clip(text, frame, start, duration)
++    }
++
++    /// A Filmora title (type 4, `scriptBuf`) as a graphic clip with one text layer.
++    fn text_clip(&mut self, c: &Value, frame: (u32, u32, FrameRate), start: Tick, duration: Tick) -> Option<TrackItem> {
++        let script: Value = c.get("scriptBuf").and_then(Value::as_str).and_then(|s| serde_json::from_str(s).ok())?;
++        let raw = script.get("Text").and_then(Value::as_str).unwrap_or("");
++        let text = raw.replace("\r\n", "\n").replace('\r', "\n");
++        let (w, h, rate) = frame;
++        let lines = text.lines().count().max(1) as f64;
++        let data = script.get("TextData").and_then(Value::as_array).and_then(|a| a.first());
++        let basic = data.and_then(|d| d.get("Basic"));
++        // The title's box height is its lines; the font size follows from it (Filmora's own size is
++        // relative to its preview, not to the frame).
++        let box_h = script.get("ScaleY").and_then(Value::as_f64).filter(|v| *v > 0.0 && *v <= 4.0).map(|v| v * h as f64);
++        let size =
++            box_h.map(|bh| bh / (lines * 1.2)).or_else(|| basic.and_then(|b| b.get("FontSize")).and_then(Value::as_f64)).unwrap_or(100.0).clamp(4.0, 2000.0);
++        let cx = script.get("PosX").and_then(Value::as_f64).unwrap_or(0.5).clamp(-4.0, 4.0) * w as f64;
++        let cy = script.get("PosY").and_then(Value::as_f64).unwrap_or(0.5).clamp(-4.0, 4.0) * h as f64;
++        // Text position: the alignment point on the first baseline.
++        let first_baseline = cy - lines * size * 1.2 / 2.0 + size * 0.9;
++        let mut layer: EffectInstance = graphic::new_text_layer(&text, Vec2::new(cx, first_baseline), size);
++        let align = match script.get("Layout").and_then(|l| l.get("TextAlign")).and_then(Value::as_str) {
++            Some("left") => 0,
++            Some("right") => 2,
++            _ => 1,
++        };
++        layer.params.insert("align".into(), Param::new(ParamValue::Choice(align)));
++        if let Some(font) = basic.and_then(|b| b.get("FontName")).and_then(Value::as_str).filter(|f| !f.is_empty()) {
++            layer.params.insert("font".into(), Param::new(ParamValue::Text(font.to_string())));
++        }
++        if basic.and_then(|b| b.get("FontBold")).and_then(Value::as_i64) == Some(1) {
++            layer.params.insert("faux_bold".into(), Param::new(ParamValue::Bool(true)));
++        }
++        if basic.and_then(|b| b.get("FontItalic")).and_then(Value::as_i64) == Some(1) {
++            layer.params.insert("faux_italic".into(), Param::new(ParamValue::Bool(true)));
++        }
++        let color =
++            basic.and_then(|b| b.get("TextColor")).and_then(Value::as_array).and_then(|a| a.first()).and_then(|c| c.get("Color")).and_then(Value::as_i64);
++        if let Some(rgb) = color {
++            let alpha = basic.and_then(|b| b.get("TextAlpha")).and_then(Value::as_f64).unwrap_or(255.0).clamp(0.0, 255.0) / 255.0;
++            let ch = |shift: u32| ((rgb >> shift) & 0xFF) as f32 / 255.0;
++            layer.params.insert("fill_color".into(), Param::new(ParamValue::Color([ch(16), ch(8), ch(0), alpha as f32])));
++        }
++        let src = self.graphic_source(w, h, rate);
++        let name = text.lines().next().filter(|l| !l.trim().is_empty()).unwrap_or("Title").chars().take(40).collect::<String>();
++        let mut ti = self.b.clip(src, TrackKind::Video, &name, start, duration, Tick::ZERO);
++        ti.effects.push(layer);
++        graphic::ensure_layer_uids(&mut ti.effects);
++        if script.get("TemplatePath").and_then(Value::as_str).is_some_and(|p| !p.is_empty()) {
++            self.report.warn("Filmora title templates and animations were not imported (their text was)");
++        }
++        Some(ti)
++    }
++
++    fn graphic_source(&mut self, w: u32, h: u32, rate: FrameRate) -> ItemId {
++        let key = format!("graphic:{w}x{h}@{}/{}", rate.num, rate.den);
++        if let Some(id) = self.b.find_media(&key) {
++            return id;
++        }
++        let id = self.b.p.add_item("Graphic", Label::Rose, ItemKind::Graphic { width: w, height: h, rate }, None);
++        self.b.register_media(&key, id);
++        id
++    }
++
++    /// Transform, volume and the unsupported effects of a clip; returns its audio fades.
++    fn adjust(&mut self, ti: &mut TrackItem, c: &Value, kind: TrackKind, frame: (u32, u32, FrameRate)) -> (Option<Tick>, Option<Tick>) {
++        let (w, h, _) = frame;
++        let mut fades = (None, None);
++        if kind == TrackKind::Video {
++            for e in effects(c, "Basic") {
++                match display(e) {
++                    "transform" => {
++                        let (sx, sy) = (num(e, "Scale_x"), num(e, "Scale_y"));
++                        if let (Some(sx), Some(sy)) = (sx, sy)
++                            && sx.is_finite()
++                            && sy.is_finite()
++                        {
++                            set(ti, "motion", "scale", ParamValue::Float(sy.clamp(0.0, 10_000.0)));
++                            if (sx - sy).abs() > 1e-3 {
++                                set(ti, "motion", "uniform_scale", ParamValue::Bool(false));
++                                set(ti, "motion", "scale_width", ParamValue::Float(sx.clamp(0.0, 10_000.0)));
++                            }
++                        }
++                        if num(e, "Position_x").is_some() || num(e, "Position_y").is_some() {
++                            let px = num(e, "Position_x").unwrap_or(0.5).clamp(-100.0, 100.0) * w as f64;
++                            let py = num(e, "Position_y").unwrap_or(0.5).clamp(-100.0, 100.0) * h as f64;
++                            set(ti, "motion", "position", ParamValue::Vec2(Vec2::new(px, py)));
++                        }
++                        if let Some(r) = num(e, "Rotation").filter(|r| r.is_finite()) {
++                            set(ti, "motion", "rotation", ParamValue::Float(r));
++                        }
++                        if flag(e, "EnableShadow") == Some(true) {
++                            self.skip("drop shadows");
++                        }
++                    }
++                    "crop-pan-zoom" => {
++                        if e.get("paramList").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
++                            self.skip("crop and pan-and-zoom");
++                        }
++                    }
++                    "" => {}
++                    other => self.skip(&format!("\"{other}\" effects")),
++                }
++            }
++        } else {
++            for e in effects(c, "BasicFollow") {
++                match display(e) {
++                    "volume" => {
++                        if let Some(db) = num(e, "VolumeGain").filter(|d| d.is_finite()) {
++                            ti.gain_db = db.clamp(-96.0, 96.0);
++                        }
++                        if flag(e, "Mute") == Some(true) {
++                            ti.enabled = false;
++                        }
++                    }
++                    "fade" => {
++                        fades = (
++                            num(e, "FadeInTime").filter(|s| s.is_finite() && *s > 0.0).map(Tick::from_seconds_f64),
++                            num(e, "FadeOutTime").filter(|s| s.is_finite() && *s > 0.0).map(Tick::from_seconds_f64),
++                        );
++                    }
++                    "equalizer" | "ChromaKeyV3" if e.get("paramList").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) => {
++                        let d = display(e).to_string();
++                        self.skip(&format!("\"{d}\" settings"));
++                    }
++                    _ => {}
++                }
++            }
++        }
++        for chain in ["Color", "Effect", "Mask"] {
++            let names: Vec<String> = effects(c, chain).map(|e| display(e).to_string()).filter(|n| !n.is_empty()).collect();
++            for n in names {
++                let what = match chain {
++                    "Color" => "colour adjustments".to_string(),
++                    "Mask" => "masks".to_string(),
++                    _ => format!("\"{n}\" effects"),
++                };
++                // An untouched colour panel is in every clip's chain; only real settings count.
++                if chain == "Color" && !effects(c, "Color").any(|e| e.get("paramList").and_then(Value::as_array).is_some_and(|p| p.len() > 12)) {
++                    continue;
++                }
++                self.skip(&what);
++            }
++        }
++        if c.get("audio_cloud_algorithm").is_some() || c.get("video_cloud_algorithm").is_some() || c.get("humanseg_hair").is_some() {
++            self.skip("AI processing (denoise, segmentation, cloud effects)");
++        }
++        fades
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    /// A stored (uncompressed) ZIP of `files`, as a test fixture.
++    pub(crate) fn zip(files: &[(&str, &str)]) -> Vec<u8> {
++        let mut out = Vec::new();
++        let mut central = Vec::new();
++        for (name, data) in files {
++            let local = out.len() as u32;
++            let crc = 0u32; // not checked
++            for b in [b"PK\x03\x04".as_slice(), &20u16.to_le_bytes(), &0u16.to_le_bytes(), &0u16.to_le_bytes(), &0u32.to_le_bytes(), &crc.to_le_bytes()] {
++                out.extend_from_slice(b);
++            }
++            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
++            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
++            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
++            out.extend_from_slice(&0u16.to_le_bytes());
++            out.extend_from_slice(name.as_bytes());
++            out.extend_from_slice(data.as_bytes());
++            central.extend_from_slice(b"PK\x01\x02");
++            central.extend_from_slice(&20u16.to_le_bytes());
++            central.extend_from_slice(&20u16.to_le_bytes());
++            central.extend_from_slice(&0u16.to_le_bytes());
++            central.extend_from_slice(&0u16.to_le_bytes()); // stored
++            central.extend_from_slice(&0u32.to_le_bytes());
++            central.extend_from_slice(&crc.to_le_bytes());
++            central.extend_from_slice(&(data.len() as u32).to_le_bytes());
++            central.extend_from_slice(&(data.len() as u32).to_le_bytes());
++            central.extend_from_slice(&(name.len() as u16).to_le_bytes());
++            central.extend_from_slice(&[0; 12]);
++            central.extend_from_slice(&local.to_le_bytes());
++            central.extend_from_slice(name.as_bytes());
++        }
++        let cd = out.len() as u32;
++        let n = files.len() as u16;
++        out.extend_from_slice(&central);
++        out.extend_from_slice(b"PK\x05\x06");
++        out.extend_from_slice(&[0; 4]);
++        out.extend_from_slice(&n.to_le_bytes());
++        out.extend_from_slice(&n.to_le_bytes());
++        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
++        out.extend_from_slice(&cd.to_le_bytes());
++        out.extend_from_slice(&0u16.to_le_bytes());
++        out
++    }
++
++    const INFO: &str = r#"{"project_file_name":"Coffee Reel","timeline_mediaId":"AA-BB"}"#;
++
++    /// Our own minimal timeline in Filmora's shape: music, a linked video+audio clip trimmed and
++    /// at 2× speed, a still at Filmora's 3600 s, a title in a compound clip with a dissolve out,
++    /// transform and volume.
++    fn timeline() -> String {
++        let speed2 = r#"{\"Version\": 3,\"keyframeSets\": [{\"_time\": 0.0,\"_value\": 2.0},{\"_time\": 1.0,\"_value\": 2.0}]}"#;
++        let title = serde_json::json!({
++            "Text": "YOU\rREADY?", "PosX": 0.5, "PosY": 0.25, "ScaleY": 0.18,
++            "Layout": {"TextAlign": "center"},
++            "TextData": [{"Basic": {"FontName": "Test Sans", "FontSize": 120.0, "FontBold": 1, "TextColor": [{"Color": 0xFF7200}], "TextAlpha": 255}}]
++        })
++        .to_string();
++        let title = serde_json::to_string(&title).unwrap_or_default();
++        format!(
++            r#"{{"currentTimelineId":1,"timelineInfos":[
++            {{"timelineId":1,"frameRate":{{"num":25,"den":1}},"resolutionWidth":1080,"resolutionHeight":1920,"trackInfos":[
++              {{"trackType":2,"clipList":[{{"type":2,"filename":"file://Volumes/Mac2/Music/song.mp3","sourceUuid":"s-music","inPoint":0,"outPoint":100000000,"tlBegin":0,"tlEnd":100000000,
++                 "effectChainList":[{{"name":"BasicFollow","effectList":[{{"display":"volume","paramList":[{{"name":"VolumeGain","fxParam":{{"paramType":2,"unValue":-6.0}}}}]}},
++                   {{"display":"fade","paramList":[{{"name":"FadeInTime","fxParam":{{"paramType":2,"unValue":1.0}}}},{{"name":"FadeOutTime","fxParam":{{"paramType":2,"unValue":2.0}}}}]}}]}}]}}]}},
++              {{"trackType":2,"trackTag":1,"clipList":[{{"type":2,"filename":"file://Volumes/LaCie/Club/IMG_1.mov","sourceUuid":"s-1","inPoint":40000000,"outPoint":80000000,"tlBegin":0,"tlEnd":20000000,"speed":{{"speedParam":"{speed2}"}}}}]}},
++              {{"trackType":1,"trackTag":2,"clipList":[
++                 {{"type":1,"filename":"file://Volumes/LaCie/Club/IMG_1.mov","sourceUuid":"s-1","inPoint":40000000,"outPoint":80000000,"tlBegin":0,"tlEnd":20000000,"speed":{{"speedParam":"{speed2}"}},
++                   "effectChainList":[{{"name":"Basic","effectList":[{{"display":"transform","paramList":[{{"name":"Scale_x","fxParam":{{"paramType":3,"unValue":150.0}}}},{{"name":"Scale_y","fxParam":{{"paramType":3,"unValue":150.0}}}},{{"name":"Position_x","fxParam":{{"paramType":3,"unValue":0.25}}}},{{"name":"Rotation","fxParam":{{"paramType":3,"unValue":10.0}}}}]}}]}},
++                     {{"name":"Effect","effectList":[{{"display":"Flip","paramList":[]}}]}}]}},
++                 {{"type":1,"filename":"file:///Users/emil/Logos/logo.png","sourceUuid":"s-2","inPoint":36000000000,"outPoint":36030000000,"tlBegin":20000000,"tlEnd":50000000}}]}},
++              {{"trackType":1,"trackTag":4,"clipList":[{{"type":7,"timelineId":2,"inPoint":0,"outPoint":30000000,"tlBegin":0,"tlEnd":30000000,"isAudio":0,
++                 "postTransition":{{"display":"Dissolve","tlBegin":25000000,"tlEnd":30000000}}}}]}}]}},
++            {{"timelineId":2,"frameRate":{{"num":25,"den":1}},"resolutionWidth":1080,"resolutionHeight":1920,"trackInfos":[
++              {{"trackType":1,"clipList":[{{"type":4,"inPoint":0,"outPoint":30000000,"tlBegin":0,"tlEnd":30000000,"scriptBuf":{title}}}]}}]}}]}}"#
++        )
++    }
++
++    fn project() -> Vec<u8> {
++        zip(&[("ProjectFolder/project_info.json", INFO), ("ProjectFolder/Medias/AA-BB/timeline.wesproj", &timeline())])
++    }
++
++    #[test]
++    fn sniffs_and_detects_filmora_projects() {
++        let p = project();
++        assert!(sniff(&p));
++        assert_eq!(crate::detect(&p, Some("wfp")), Some(Format::Filmora));
++        assert_eq!(crate::detect(&p, None), Some(Format::Filmora));
++        assert!(!sniff(&zip(&[("word/document.xml", "<w/>")])));
++        assert!(!sniff(b"PK\x03\x04 junk"));
++        assert_eq!(Format::from_extension(".WFP"), Some(Format::Filmora));
++    }
++
++    #[test]
++    fn times_convert_exactly_enough() {
++        assert_eq!(ticks(10_000_000), Tick(TICKS_PER_SECOND));
++        assert_eq!(ticks(70_400_000).seconds(), 7.04);
++        assert_eq!(ticks(-10_000_000), Tick(-TICKS_PER_SECOND));
++        assert_eq!(ticks(i64::MAX), Tick(i64::MAX));
++    }
++
++    #[test]
++    fn paths_from_filmora_urls() {
++        assert_eq!(path_of("file://Volumes/LaCie/a b.mov"), "/Volumes/LaCie/a b.mov");
++        assert_eq!(path_of("file:///Users/emil/x.png"), "/Users/emil/x.png");
++        assert_eq!(path_of("file:///C:/Videos/x.mp4"), "C:/Videos/x.mp4");
++        assert_eq!(path_of("file://Users/emil/a%20b.mov"), "/Users/emil/a b.mov");
++    }
++
++    #[test]
++    fn imports_clips_titles_transitions_and_adjustments() {
++        let (imported, _report) = crate::import(&project(), Format::Filmora, None).unwrap();
++        let p = &imported.project;
++        let seq_id = imported.sequences[0];
++        assert_eq!(p.item(seq_id).unwrap().name, "Coffee Reel");
++        let seq = p.sequence(seq_id).unwrap();
++        assert_eq!((seq.settings.width, seq.settings.height), (1080, 1920));
++        assert_eq!(seq.settings.frame_rate, FrameRate { num: 25, den: 1 });
++        let sec = |s: f64| Tick::from_seconds_f64(s);
++        // Audio: music (−6 dB, fades) on A1, the clip's own audio on A2.
++        assert_eq!(seq.audio_tracks.len(), 2);
++        let music = &seq.audio_tracks[0];
++        assert_eq!(music.items[0].gain_db, -6.0);
++        assert_eq!(music.items[0].duration, sec(10.0));
++        assert_eq!(music.transitions.len(), 2);
++        assert!(music.transitions.iter().any(|t| t.from.is_none() && t.duration == sec(1.0) && t.start == Tick::ZERO));
++        assert!(music.transitions.iter().any(|t| t.to.is_none() && t.duration == sec(2.0) && t.start == sec(8.0)));
++        // Video: trimmed at 2×, linked to its audio, Motion from Transform; then the still.
++        let v1 = &seq.video_tracks[0];
++        assert_eq!(v1.items.len(), 2);
++        let clip = &v1.items[0];
++        assert_eq!((clip.source_in, clip.duration, clip.speed), (sec(4.0), sec(2.0), 2.0));
++        assert!(clip.scale_to_frame);
++        assert_eq!(clip.link, seq.audio_tracks[1].items[0].link);
++        assert!(clip.link.is_some());
++        let motion = clip.effect("motion").unwrap();
++        assert_eq!(motion.params["scale"].value, ParamValue::Float(150.0));
++        assert_eq!(motion.params["rotation"].value, ParamValue::Float(10.0));
++        assert_eq!(motion.params["position"].value, ParamValue::Vec2(Vec2::new(270.0, 960.0)));
++        let still = &v1.items[1];
++        assert_eq!((still.start, still.duration, still.source_in), (sec(2.0), sec(3.0), Tick::ZERO));
++        assert!(matches!(p.item(still.item).unwrap().kind, ItemKind::Media(_)));
++    }
++
++    #[test]
++    fn imports_titles_as_text_graphics_with_their_transition() {
++        let (imported, _report) = crate::import(&project(), Format::Filmora, None).unwrap();
++        let p = &imported.project;
++        let seq = p.sequence(imported.sequences[0]).unwrap();
++        let sec = |s: f64| Tick::from_seconds_f64(s);
++        // The title: a graphic clip with its text, font, colour and size, and a dissolve out.
++        let v2 = &seq.video_tracks[1];
++        let title = &v2.items[0];
++        assert!(matches!(p.item(title.item).unwrap().kind, ItemKind::Graphic { width: 1080, height: 1920, .. }));
++        let layer = title.effects.iter().find(|e| graphic::is_layer(e)).unwrap();
++        assert_eq!(layer.params["text"].value, ParamValue::Text("YOU\nREADY?".into()));
++        assert_eq!(layer.params["font"].value, ParamValue::Text("Test Sans".into()));
++        assert_eq!(layer.params["fill_color"].value, ParamValue::Color([1.0, 114.0 / 255.0, 0.0, 1.0]));
++        let ParamValue::Float(size) = layer.params["size"].value else { panic!("size") };
++        assert!((size - 0.18 * 1920.0 / 2.4).abs() < 1e-6, "{size}");
++        assert_eq!(v2.transitions.len(), 1);
++        let t = &v2.transitions[0];
++        assert_eq!((t.start, t.duration, t.from, t.to, t.align), (sec(2.5), sec(0.5), Some(title.id), None, TransitionAlign::EndAtCut));
++        assert_eq!(t.effect.effect, "cross_dissolve");
++    }
++
++    #[test]
++    fn imports_media_paths_and_reports_what_it_skips() {
++        let (imported, report) = crate::import(&project(), Format::Filmora, None).unwrap();
++        let p = &imported.project;
++        // Media: paths fixed up, deduplicated.
++        let paths: Vec<String> = p
++            .items
++            .values()
++            .filter_map(|i| i.as_media())
++            .filter_map(|m| match &m.media {
++                filmcraft_project::MediaRef::File { path } => Some(path.clone()),
++                _ => None,
++            })
++            .collect();
++        for want in ["/Volumes/Mac2/Music/song.mp3", "/Volumes/LaCie/Club/IMG_1.mov", "/Users/emil/Logos/logo.png"] {
++            assert_eq!(paths.iter().filter(|p| *p == want).count(), 1, "{want}: {paths:?}");
++        }
++        // What could not be carried is reported.
++        assert!(report.mentions("Flip"), "{report}");
++    }
++
++    #[test]
++    fn hostile_archives_fail_cleanly() {
++        for bad in [Vec::new(), b"PK\x03\x04".to_vec(), zip(&[("ProjectFolder/project_info.json", "{")]), zip(&[("ProjectFolder/project_info.json", INFO)])] {
++            assert!(crate::import(&bad, Format::Filmora, None).is_err());
++        }
++        // A compound clip that contains itself.
++        let t = r#"{"currentTimelineId":1,"timelineInfos":[{"timelineId":1,"trackInfos":[{"trackType":1,"clipList":[{"type":7,"timelineId":1,"tlBegin":0,"tlEnd":10000000}]}]}]}"#;
++        let (imported, report) =
++            crate::import(&zip(&[("ProjectFolder/project_info.json", INFO), ("ProjectFolder/Medias/AA-BB/timeline.wesproj", t)]), Format::Filmora, None)
++                .unwrap();
++        assert_eq!(imported.sequences.len(), 1);
++        assert!(report.mentions("contains itself"), "{report}");
++    }
++
++    /// The user's own Filmora projects, when `FILMCRAFT_FILMORA_FIXTURES` names a folder of them
++    /// (never committed: they are private).
++    #[test]
++    fn real_filmora_projects_when_available() {
++        let Some(dir) = std::env::var_os("FILMCRAFT_FILMORA_FIXTURES") else { return };
++        let mut n = 0;
++        for e in std::fs::read_dir(dir).unwrap() {
++            let path = e.unwrap().path();
++            if path.extension().and_then(|x| x.to_str()) != Some("wfp") {
++                continue;
++            }
++            let bytes = std::fs::read(&path).unwrap();
++            let (imported, report) = crate::import(&bytes, Format::Filmora, None).unwrap();
++            let seq = imported.project.sequence(imported.sequences[0]).unwrap();
++            let clips: usize = seq.all_tracks().map(|t| t.items.len()).sum();
++            eprintln!("{}: {} video / {} audio tracks, {clips} clips\n{report}", path.display(), seq.video_tracks.len(), seq.audio_tracks.len());
++            seq.check().unwrap();
++            n += 1;
++        }
++        assert!(n > 0);
++    }
++}
+diff --git a/crates/interchange/src/lib.rs b/crates/interchange/src/lib.rs
+index 8daeca6..a9a7b4d 100644
+--- a/crates/interchange/src/lib.rs
++++ b/crates/interchange/src/lib.rs
+@@ -7,7 +7,8 @@
+ //! - **FCPXML** 1.9–1.11 ([`fcpxml`]);
+ //! - **OpenTimelineIO** JSON (`.otio`) ([`otio`]);
+ //! - **AAF** (`.aaf`, Edit Protocol, structured storage) ([`aaf`]);
+-//! - **OMF Interchange 2.0** (`.omf`, Bento) for audio post ([`omf`]).
++//! - **OMF Interchange 2.0** (`.omf`, Bento) for audio post ([`omf`]);
++//! - **Wondershare Filmora projects** (`.wfp`, Filmora 9 and later), import only ([`filmora`]).
+ //!
+ //! AAF and OMF can embed or consolidate audio: [`essence::audio_needs`] lists what the caller
+ //! (the engine) has to render, and [`essence::MediaOptions`] passes the result back in.
+@@ -31,6 +32,7 @@ pub mod edl;
+ pub mod essence;
+ pub mod fcp7;
+ pub mod fcpxml;
++pub mod filmora;
+ pub mod omf;
+ pub mod otio;
+ 
+@@ -104,6 +106,9 @@ pub enum Format {
+     Aaf,
+     /// OMF Interchange 2.0 (Bento container).
+     Omf,
++    /// Wondershare Filmora project (`.wfp`, a ZIP of JSON), import only. Not in [`Format::ALL`],
++    /// which lists the formats FilmCraft exports.
++    Filmora,
+ }
+ 
+ impl Format {
+@@ -117,6 +122,7 @@ impl Format {
+             Format::Otio => "OpenTimelineIO",
+             Format::Aaf => "AAF",
+             Format::Omf => "OMF",
++            Format::Filmora => "Filmora Project",
+         }
+     }
+ 
+@@ -129,6 +135,7 @@ impl Format {
+             Format::Otio => "otio",
+             Format::Aaf => "aaf",
+             Format::Omf => "omf",
++            Format::Filmora => "wfp",
+         }
+     }
+ 
+@@ -142,6 +149,7 @@ impl Format {
+             "otio" => Some(Format::Otio),
+             "aaf" => Some(Format::Aaf),
+             "omf" | "omfi" => Some(Format::Omf),
++            "wfp" => Some(Format::Filmora),
+             _ => None,
+         }
+     }
+@@ -155,6 +163,9 @@ pub fn detect(bytes: &[u8], extension: Option<&str>) -> Option<Format> {
+     if omf::sniff(bytes) && extension.is_none_or(|e| matches!(Format::from_extension(e), None | Some(Format::Omf))) {
+         return Some(Format::Omf);
+     }
++    if filmora::sniff(bytes) {
++        return Some(Format::Filmora);
++    }
+     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+     let head = head.trim_start_matches('\u{feff}').trim_start();
+     if head.starts_with('<') {
+@@ -307,6 +318,12 @@ pub fn import_with(bytes: &[u8], format: Format, opts: &ImportOptions) -> Result
+         }
+         return Ok((imported, report));
+     }
++    if format == Format::Filmora {
++        let mut report = Report::default();
++        let mut imported = filmora::import(bytes, opts, &mut report)?;
++        bound_start_timecodes(&mut imported, &mut report);
++        return Ok((imported, report));
++    }
+     let text = decode_text(bytes);
+     let mut report = Report::default();
+     let imported = match format {
+@@ -314,7 +331,7 @@ pub fn import_with(bytes: &[u8], format: Format, opts: &ImportOptions) -> Result
+         Format::Fcp7Xml => fcp7::import(&text, opts, &mut report)?,
+         Format::Fcpxml => fcpxml::import(&text, opts, &mut report)?,
+         Format::Otio => otio::import(&text, opts, &mut report)?,
+-        Format::Aaf | Format::Omf => return Err(Error::Other("AAF / OMF are binary documents".into())),
++        Format::Aaf | Format::Omf | Format::Filmora => return Err(Error::Other("AAF / OMF / Filmora are binary documents".into())),
+     };
+     let mut imported = imported;
+     bound_start_timecodes(&mut imported, &mut report);
+@@ -469,6 +486,7 @@ pub fn export(project: &Project, sequence: ItemId, format: Format, opts: &Export
+         Format::Fcpxml => fcpxml::export(project, sequence, opts, &mut report)?,
+         Format::Otio => otio::export(project, sequence, opts, &mut report)?,
+         Format::Aaf | Format::Omf => return Err(Error::Other("AAF / OMF are binary documents".into())),
++        Format::Filmora => return Err(Error::Other("Filmora projects can be imported, not exported".into())),
+     };
+     Ok((text.into_bytes(), report))
+ }
+diff --git a/crates/ui-egui/src/app/files.rs b/crates/ui-egui/src/app/files.rs
+index 137f5d4..7c56962 100644
+--- a/crates/ui-egui/src/app/files.rs
++++ b/crates/ui-egui/src/app/files.rs
+@@ -15,7 +15,7 @@ impl FilmcraftApp {
+                     .iter()
+                     .chain(filmcraft_media::AUDIO_EXTENSIONS)
+                     .chain(filmcraft_media::STILL_EXTENSIONS)
+-                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf"])
++                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "wfp"])
+                     .copied()
+                     .collect();
+                 let bin = params.get("bin").cloned();
+diff --git a/docs/file-format-parity.md b/docs/file-format-parity.md
+index 029729c..357862e 100644
+--- a/docs/file-format-parity.md
++++ b/docs/file-format-parity.md
+@@ -21,6 +21,7 @@ only). "Tested" names the evidence.
+ | OMF 2.0 | write | no | yes | never opened in Pro Tools | 50% |
+ | EDL (CMX 3600) | read + write | yes | yes | tests | 85% |
+ | OpenTimelineIO | read + write (26.0) | yes | yes | tests | 80% |
++| Wondershare Filmora project `.wfp` | — | yes (Filmora 9+: tracks, clips, trims, speed, stills, titles as text graphics, Transform → Motion, volume, audio fades, transitions; effects, colour, masks, pan-and-zoom reported) | no | `filmora` unit tests, engine `file.import` test, five real Filmora 16 projects | ahead |
+ | Avid Log Exchange (ALE) | write | no | yes | — | 70% |
+ | Marker CSV / text | write | — | yes (#454) | — | 80% |
+ | Selection as project | Premiere project | — | `.fcproj` only | — | 50% |
+-- 
+2.43.0
+
