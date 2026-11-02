@@ -20,12 +20,11 @@ const MAX_MOD_BYTES: u64 = 1024 * 1024;
 const CSS_TEMPLATE: &str = r#"/* Lean Teams - eigenes CSS
  *
  * Wird über Teams gelegt. Ändern, speichern, dann im Tray-Menü
- * "Overlay neu laden" - kein Neustart nötig.
+ * "Design neu laden" - kein Neustart nötig.
  *
- * Selektoren finden: Tray-Menü > "Entwicklertools", dann mit dem
- * Pfeil-Werkzeug auf ein Element klicken. Am stabilsten sind
- * [data-tid="..."]-Attribute; Teams' generierte Klassennamen ändern sich
- * mit jedem Update.
+ * Selektoren finden: Teams im normalen Browser öffnen (teams.microsoft.com),
+ * Rechtsklick > Untersuchen. Am stabilsten sind [data-tid="..."]-Attribute;
+ * Teams' generierte Klassennamen ändern sich mit jedem Update.
  *
  * Beispiele (Kommentarzeichen entfernen, um sie zu nutzen):
  */
@@ -52,16 +51,16 @@ Jede .css- und .js-Datei in diesem Ordner wird in Teams geladen,
 in alphabetischer Reihenfolge.
 
   Ausschalten:  Dateinamen mit _ beginnen lassen  (_mein-mod.css)
-  Neu laden:    Tray-Menü > "Overlay neu laden"
+  Neu laden:    Tray-Menü > "Design neu laden"
                 CSS wirkt sofort, bei JS-Mods lädt Teams kurz neu.
-  Selektoren:   Tray-Menü > "Entwicklertools"
+  Selektoren:   Teams im Browser öffnen, Rechtsklick > Untersuchen
 
 CSS-Mods sind reine Optik und können nichts kaputt machen.
 
 JS-Mods laufen mit denselben Rechten wie Teams selbst: sie sehen deine
 Chats und können in deinem Namen handeln. Nur eigenen oder geprüften Code
 hier ablegen. Jeder Mod läuft einmal pro Seitenaufruf; ein Fehler in einem
-Mod stoppt die anderen nicht (Meldungen in der Konsole der Entwicklertools).
+Mod stoppt die anderen nicht.
 
 Ganz ausschalten: in config.json  "overlay": { "mods": false }
 "#;
@@ -105,9 +104,6 @@ pub struct OverlayConfig {
     pub mods: bool,
     /// Keep the window above all others.
     pub always_on_top: bool,
-    /// Show the small "LT" button that opens the overlay menu
-    /// (Ctrl/Cmd+Shift+L and the tray menu work either way).
-    pub panel_button: bool,
 }
 
 impl Default for OverlayConfig {
@@ -121,7 +117,6 @@ impl Default for OverlayConfig {
             custom_css: true,
             mods: true,
             always_on_top: false,
-            panel_button: true,
         }
     }
 }
@@ -348,126 +343,21 @@ pub fn mod_scripts(config: &OverlayConfig, mods: &[Mod]) -> Vec<String> {
         .collect()
 }
 
-/// A file in the mods folder as shown in the overlay menu.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ModFile {
-    /// File name on disk, including a leading `_` when switched off.
-    pub file: String,
-    /// Name without the switch-off prefix.
-    pub name: String,
-    pub kind: &'static str,
-    pub enabled: bool,
-}
-
-fn mod_kind(file: &str) -> Option<&'static str> {
-    match Path::new(file)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "css" => Some("css"),
-        "js" => Some("js"),
-        _ => None,
-    }
-}
-
-/// All CSS/JS files in the mods folder, switched on or off, sorted by name.
-pub fn list_mods(dir: &Path) -> Vec<ModFile> {
-    let Ok(entries) = fs::read_dir(dir.join(MODS_DIR)) else {
-        return Vec::new();
-    };
-    let mut files: Vec<ModFile> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.metadata().map(|m| m.is_file()).unwrap_or(false))
-        .filter_map(|e| {
-            let file = e.file_name().to_string_lossy().into_owned();
-            if file.starts_with('.') {
-                return None;
-            }
-            let kind = mod_kind(&file)?;
-            let name = file.trim_start_matches('_').to_string();
-            Some(ModFile {
-                enabled: !file.starts_with('_'),
-                file,
-                name,
-                kind,
-            })
-        })
-        .collect();
-    files.sort_by(|a, b| a.name.cmp(&b.name));
-    files
-}
-
-/// Switches a mod on or off by adding or removing the leading `_`.
-/// Only plain CSS/JS file names inside the mods folder are accepted.
-pub fn set_mod_enabled(dir: &Path, file: &str, enabled: bool) -> Result<(), String> {
-    let plain = !file.is_empty()
-        && !file.starts_with('.')
-        && !file.contains(['/', '\\', ':'])
-        && Path::new(file)
-            .file_name()
-            .map(|n| n == file)
-            .unwrap_or(false);
-    if !plain || mod_kind(file).is_none() {
-        return Err(format!("not a mod file: {file}"));
-    }
-    let mods_dir = dir.join(MODS_DIR);
-    let from = mods_dir.join(file);
-    if !from.is_file() {
-        return Err(format!("mod not found: {file}"));
-    }
-    let base = file.trim_start_matches('_');
-    let target = if enabled {
-        base.to_string()
-    } else {
-        format!("_{base}")
-    };
-    if target == file {
-        return Ok(());
-    }
-    let to = mods_dir.join(&target);
-    if to.exists() {
-        return Err(format!("{target} already exists"));
-    }
-    fs::rename(from, to).map_err(|e| e.to_string())
-}
-
-/// Largest custom.css the overlay menu will save.
-pub const MAX_CUSTOM_CSS_BYTES: usize = 1024 * 1024;
-
-pub fn save_user_css(dir: &Path, css: &str) -> Result<(), String> {
-    if css.len() > MAX_CUSTOM_CSS_BYTES {
-        return Err("custom.css is larger than 1 MB".into());
-    }
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    fs::write(dir.join(CSS_FILE), css).map_err(|e| e.to_string())
-}
-
 /// Everything the window needs to apply the current overlay.
 #[derive(Debug, Clone, Default)]
 pub struct Overlay {
     pub settings: OverlayConfig,
-    pub user_css: String,
-    pub mods: Vec<Mod>,
     pub css: String,
     pub js: Vec<String>,
 }
 
 impl Overlay {
     pub fn load(dir: &Path, settings: OverlayConfig) -> Self {
-        Self::build(settings, load_user_css(dir), load_mods(dir))
-    }
-
-    /// Rebuilds from in-memory parts; used for live preview while the user
-    /// drags a slider, without touching the disk.
-    pub fn build(settings: OverlayConfig, user_css: String, mods: Vec<Mod>) -> Self {
+        let mods = load_mods(dir);
         Self {
-            css: build_css(&settings, &user_css, &mods),
+            css: build_css(&settings, &load_user_css(dir), &mods),
             js: mod_scripts(&settings, &mods),
             settings,
-            user_css,
-            mods,
         }
     }
 }
@@ -510,11 +400,6 @@ pub fn theme_script(config: &OverlayConfig) -> String {
         "borderTint": config.border_tint(),
     });
     format!("window.__leanTheme && window.__leanTheme.set({args});")
-}
-
-/// JavaScript that shows or hides the "LT" button (lt-button.js).
-pub fn button_script(visible: bool) -> String {
-    format!("window.__leanButton && window.__leanButton.set({visible});")
 }
 
 /// JavaScript that turns the privacy blur on or off.
@@ -642,57 +527,6 @@ mod tests {
         };
         assert!(!build_css(&off, "", &mods).contains(".a{}"));
         assert!(mod_scripts(&off, &mods).is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn mods_can_be_switched_off_and_on() {
-        let dir = temp_dir("mods-toggle");
-        let mods_dir = dir.join(MODS_DIR);
-        fs::create_dir_all(&mods_dir).unwrap();
-        fs::write(mods_dir.join("theme.css"), ".t{}").unwrap();
-        fs::write(mods_dir.join("_tool.js"), "1").unwrap();
-
-        let listed = list_mods(&dir);
-        assert_eq!(listed.len(), 2);
-        assert_eq!(
-            (listed[0].name.as_str(), listed[0].enabled),
-            ("theme.css", true)
-        );
-        assert_eq!(
-            (listed[1].name.as_str(), listed[1].enabled),
-            ("tool.js", false)
-        );
-
-        set_mod_enabled(&dir, "theme.css", false).unwrap();
-        set_mod_enabled(&dir, "_tool.js", true).unwrap();
-        assert!(mods_dir.join("_theme.css").is_file());
-        assert!(mods_dir.join("tool.js").is_file());
-        set_mod_enabled(&dir, "tool.js", true).unwrap();
-
-        for bad in [
-            "../config.json",
-            "a/b.css",
-            "x.txt",
-            "",
-            ".hidden.css",
-            "missing.css",
-            "C:evil.css",
-        ] {
-            assert!(set_mod_enabled(&dir, bad, true).is_err(), "{bad}");
-        }
-        fs::write(mods_dir.join("tool.css"), "").unwrap();
-        fs::write(mods_dir.join("_tool.css"), "").unwrap();
-        assert!(set_mod_enabled(&dir, "_tool.css", true).is_err());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn custom_css_is_saved_with_a_size_limit() {
-        let dir = temp_dir("css-save");
-        save_user_css(&dir, ".saved{}").unwrap();
-        assert_eq!(load_user_css(&dir), ".saved{}");
-        assert!(save_user_css(&dir, &"x".repeat(MAX_CUSTOM_CSS_BYTES + 1)).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

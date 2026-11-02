@@ -85,13 +85,6 @@ impl Config {
         }
     }
 
-    /// Writes the config back, e.g. after the overlay menu changed it.
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        fs::write(dir.join(FILE_NAME), json).map_err(|e| e.to_string())
-    }
-
     pub fn parse(text: &str) -> Self {
         match serde_json::from_str(text) {
             Ok(config) => config,

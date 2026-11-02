@@ -7,10 +7,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod appearance;
 mod config;
 #[cfg(target_os = "macos")]
 mod macos;
-mod menu;
 mod notify;
 mod overlay;
 mod policy;
@@ -109,7 +109,6 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
-    menu::hide_panel(app);
     if let Some(window) = app.get_webview_window(MAIN) {
         let _ = window.hide();
         set_low_memory(&window, true);
@@ -216,7 +215,7 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
             // re-apply after each load so live changes survive navigation.
             .on_page_load(|window, payload| {
                 if payload.event() == PageLoadEvent::Finished {
-                    menu::apply_on_load(&window);
+                    appearance::apply_on_load(&window);
                 }
             })
             .zoom_hotkeys_enabled(true)
@@ -237,7 +236,6 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
         include_str!("theme.js"),
         overlay::theme_script(&overlay_settings)
     ));
-    builder = builder.initialization_script(include_str!("lt-button.js"));
     #[cfg(target_os = "linux")]
     {
         builder = builder.initialization_script(include_str!("link-shim.js"));
@@ -269,7 +267,13 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         autostart_enabled,
         None::<&str>,
     )?;
-    let settings = MenuItem::with_id(app, "settings", "Einstellungen öffnen", true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        app,
+        "settings",
+        "Einstellungsordner öffnen",
+        true,
+        None::<&str>,
+    )?;
     let on_top = CheckMenuItem::with_id(
         app,
         "on-top",
@@ -283,28 +287,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             .always_on_top,
         None::<&str>,
     )?;
-    let overlay_menu = MenuItem::with_id(
-        app,
-        "overlay-menu",
-        "Overlay-Menü (Strg/⌘+Shift+L)",
-        true,
-        None::<&str>,
-    )?;
-    let devtools = MenuItem::with_id(app, "devtools", "Entwicklertools", true, None::<&str>)?;
-    let overlay_css = MenuItem::with_id(
-        app,
-        "overlay-css",
-        "Overlay-CSS bearbeiten",
-        true,
-        None::<&str>,
-    )?;
-    let overlay_reload = MenuItem::with_id(
-        app,
-        "overlay-reload",
-        "Overlay neu laden",
-        true,
-        None::<&str>,
-    )?;
+    let reload_look =
+        MenuItem::with_id(app, "reload-look", "Design neu laden", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
 
@@ -321,11 +305,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         menu.append(&clear)?;
     }
     menu.append_items(&[
-        &overlay_menu,
         &on_top,
-        &overlay_css,
-        &overlay_reload,
-        &devtools,
+        &reload_look,
         &sep()?,
         &autostart,
         &settings,
@@ -380,28 +361,12 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     let _ = on_top.set_checked(on);
                 }
             }
-            "overlay-css" => {
-                if let Ok(dir) = app.path().app_config_dir() {
-                    overlay::load_user_css(&dir);
-                    let path = dir.join(overlay::CSS_FILE);
-                    let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
-                }
-            }
-            "overlay-reload" => menu::reload(app),
-            "overlay-menu" => {
-                show_main(app);
-                menu::toggle_panel(app);
-            }
-            "devtools" => {
-                if let Some(w) = app.get_webview_window(MAIN) {
-                    show_main(app);
-                    w.open_devtools();
-                }
-            }
+            "reload-look" => appearance::reload(app),
+            // The folder holds config.json, custom.css and mods/.
             "settings" => {
                 if let Ok(dir) = app.path().app_config_dir() {
-                    let path = dir.join(config::FILE_NAME);
-                    let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
                 }
             }
             "quit" => app.exit(0),
@@ -460,22 +425,11 @@ fn main() {
                 .open_js_links_on_click(false)
                 .build(),
         )
-        .plugin(menu::shortcut_plugin())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_ARG]),
         ))
-        .invoke_handler(tauri::generate_handler![
-            notify,
-            open_link,
-            menu::overlay_state,
-            menu::overlay_update,
-            menu::overlay_toggle_mod,
-            menu::overlay_open_folder,
-            menu::overlay_devtools,
-            menu::overlay_menu_toggle,
-            menu::overlay_button_visible
-        ])
+        .invoke_handler(tauri::generate_handler![notify, open_link,])
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             let config = Config::load_or_init(&dir);
@@ -486,7 +440,6 @@ fn main() {
             });
             build_tray(app.handle())?;
             build_main_window(app.handle(), start_hidden)?;
-            menu::maybe_selftest(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -507,9 +460,6 @@ fn main() {
                     if *focused {
                         set_low_memory(&webview, false);
                     }
-                    menu::set_shortcut_active(window.app_handle(), *focused);
-                    // Focus moving into the overlay menu is not "away".
-                    let away = !*focused && !menu::panel_visible(window.app_handle());
                     let blur = window
                         .state::<AppState>()
                         .overlay
@@ -518,7 +468,7 @@ fn main() {
                         .settings
                         .privacy_blur;
                     if blur {
-                        let _ = webview.eval(overlay::blur_script(away));
+                        let _ = webview.eval(overlay::blur_script(!*focused));
                     }
                 }
                 WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
