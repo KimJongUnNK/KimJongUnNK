@@ -7,9 +7,9 @@ Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt U
 
 | | Mac | Windows |
 |---|---|---|
-| **WordCraft** (wie Word) | `WordCraft-Deutsch-macOS.zip` | `WordCraft-Deutsch-Windows-x64.zip` |
-| **DeckCraft** (wie PowerPoint) | `DeckCraft-Deutsch-macOS.zip` | `DeckCraft-Deutsch-Windows-x64.zip` |
-| **FilmCraft** (wie Premiere) – öffnet Filmora-Projekte | `FilmCraft-Deutsch-macOS.zip` | – |
+| **WordCraft – German Version** (modifiziert, wie Word) | `WordCraft-Deutsch-macOS.zip` | `WordCraft-Deutsch-Windows-x64.zip` |
+| **DeckCraft – German Version** (modifiziert, wie PowerPoint) | `DeckCraft-Deutsch-macOS.zip` | `DeckCraft-Deutsch-Windows-x64.zip` |
+| **FilmCraft – Filmora Edition** (modifiziert, wie Premiere, öffnet Filmora-Projekte) | `FilmCraft-Deutsch-macOS.zip` | – |
 
 ## Mac
 
