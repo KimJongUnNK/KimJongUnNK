@@ -26,17 +26,43 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
-/// Pushes the current overlay into the Teams page and window without a
-/// reload: stylesheet, theme engine, button, zoom, always-on-top.
-fn apply_live<R: Runtime>(app: &AppHandle<R>, current: &overlay::Overlay) {
+/// Pushes the overlay into the Teams page and window without a reload.
+/// With `previous`, only what actually changed is touched: while a slider is
+/// dragged this runs every frame, and re-applying everything made Teams
+/// stutter.
+fn apply_live<R: Runtime>(
+    app: &AppHandle<R>,
+    previous: Option<&overlay::Overlay>,
+    current: &overlay::Overlay,
+) {
     let Some(window) = main_window(app) else {
         return;
     };
-    let _ = window.eval(overlay::apply_script(&current.css));
-    let _ = window.eval(overlay::theme_script(&current.settings));
-    let _ = window.eval(overlay::button_script(current.settings.panel_button));
-    let _ = window.set_zoom(current.settings.zoom());
-    let _ = window.set_always_on_top(current.settings.always_on_top);
+    let (new, old) = (&current.settings, previous.map(|p| &p.settings));
+    if previous.map(|p| p.css != current.css).unwrap_or(true) {
+        let _ = window.eval(overlay::apply_script(&current.css));
+    }
+    let theme_changed = old.map(|o| {
+        o.accent() != new.accent() || o.tint() != new.tint() || o.border_tint() != new.border_tint()
+    });
+    if theme_changed.unwrap_or(true) {
+        let _ = window.eval(overlay::theme_script(new));
+    }
+    if old
+        .map(|o| o.panel_button != new.panel_button)
+        .unwrap_or(true)
+    {
+        let _ = window.eval(overlay::button_script(new.panel_button));
+    }
+    if old.map(|o| o.zoom() != new.zoom()).unwrap_or(true) {
+        let _ = window.set_zoom(new.zoom());
+    }
+    if old
+        .map(|o| o.always_on_top != new.always_on_top)
+        .unwrap_or(true)
+    {
+        let _ = window.set_always_on_top(new.always_on_top);
+    }
 }
 
 /// Applies everything to a page that just finished loading, including the
@@ -66,7 +92,7 @@ pub fn reload<R: Runtime>(app: &AppHandle<R>) {
         *current = next.clone();
         changed
     };
-    apply_live(app, &next);
+    apply_live(app, None, &next);
     if js_changed {
         if let Some(window) = main_window(app) {
             let _ = window.reload();
@@ -277,14 +303,14 @@ pub fn overlay_update<R: Runtime>(
     if custom_css.len() > overlay::MAX_CUSTOM_CSS_BYTES {
         return Err("custom.css is larger than 1 MB".into());
     }
-    let next = {
+    let (previous, next) = {
         let state = app.state::<AppState>();
         let mut current = state.overlay.lock().unwrap();
         let next = overlay::Overlay::build(settings, custom_css, current.mods.clone());
-        *current = next.clone();
-        next
+        let previous = std::mem::replace(&mut *current, next.clone());
+        (previous, next)
     };
-    apply_live(&app, &next);
+    apply_live(&app, Some(&previous), &next);
     if persist {
         let dir = config_dir(&app)?;
         overlay::save_user_css(&dir, &next.user_css)?;

@@ -116,7 +116,8 @@ function render() {
   [
     el("h3", { text: "Akzentfarbe" }),
     swatches(),
-    slider("tint", "Hintergrund einfärben", 0, 0.4, 0.02, (v) => Math.round(v * 100) + " %"),
+    slider("border_tint", "Ränder & Linien", 0, 1, 0.05, (v) => Math.round(v * 100) + " %"),
+    slider("tint", "Hintergründe", 0, 0.4, 0.02, (v) => Math.round(v * 100) + " %"),
     el("h3", { text: "Fenster" }),
     slider("zoom", "Zoom", 0.5, 2, 0.05, (v) => Math.round(v * 100) + " %"),
     toggle("privacy_blur", "Privacy-Blur", "Teams unscharf, wenn das Fenster nicht im Fokus ist"),

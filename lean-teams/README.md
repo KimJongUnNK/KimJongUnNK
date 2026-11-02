@@ -109,14 +109,15 @@ Das Menü ist ein eigenes kleines Fenster oben rechts über Teams. **Es gibt kei
 | Im Menü | Wirkung |
 |---|---|
 | Akzentfarbe | 9 Vorlagen, eigene Farbe oder Teams-Standard. Färbt **die ganze Seite** um, Farbwechsel werden weich überblendet |
-| Hintergrund einfärben | 0–40 %: Hintergründe und Ränder bekommen einen Hauch deiner Akzentfarbe |
+| Ränder & Linien | 0–100 %: Rahmen, Trennlinien und Umrandungen in Richtung Akzentfarbe, bis voll eingefärbt. Hintergründe und Text bleiben, wie sie sind |
+| Hintergründe | 0–40 %: ein Hauch Akzentfarbe auf Flächen. Getrennt von den Rändern, Text wird nie eingefärbt |
 | Zoom | 50–200 %, alternativ Strg/⌘ + Plus/Minus |
 | Privacy-Blur | Teams wird unscharf, sobald du das Fenster verlässt (nicht, wenn du ins Menü klickst) |
 | Immer im Vordergrund | Teams bleibt über allen anderen Fenstern |
 | Mods | Jeder Mod im `mods`-Ordner einzeln an/aus |
 | Eigenes CSS | Editor für `custom.css`, wirkt beim Tippen |
 
-**Wie die Akzentfarbe die ganze Seite erwischt:** Die Recolor-Engine (`theme.js`) kennt keine Teams-Klassennamen. Sie durchsucht alle Stylesheets, auch die, die Teams während der Laufzeit befüllt, nach Farbvariablen und Farbwerten im Teams-Lila. Diese gibt sie in deinem Farbton aus, mit derselben Helligkeit und Transparenz, also passend für Hell- und Dunkelmodus. Neue Styles erkennt sie laufend nach. Andere Farben (Rot für Fehler, Grün für „verfügbar“) bleiben unangetastet. Deshalb übersteht das Teams-Updates.
+**Wie die Akzentfarbe die ganze Seite erwischt:** Die Recolor-Engine (`theme.js`) kennt keine Teams-Klassennamen. Sie durchsucht alle Stylesheets, auch die, die Teams während der Laufzeit befüllt, nach Farbvariablen und Farbwerten im Teams-Lila. Diese gibt sie in deinem Farbton aus, mit derselben Helligkeit und Transparenz, also passend für Hell- und Dunkelmodus. Neue Styles erkennt sie laufend nach. Den teuren Scan macht sie nur, wenn Teams wirklich neue Styles hinzufügt. Beim Ziehen eines Reglers rechnet sie nur die gemerkten Farben um, einmal pro Frame, und es wird nur das an Teams geschickt, was sich geändert hat. Das hält Teams flüssig. Andere Farben (Rot für Fehler, Grün für „verfügbar“) bleiben unangetastet. Deshalb übersteht das Teams-Updates.
 
 **Selbst modden:** Alles liegt als normale Dateien im Einstellungsordner (im Menü: *Ordner öffnen*):
 
@@ -158,7 +159,7 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 | `extra_browser_args` | `""` | Windows: zusätzliche Chromium-Switches, wörtlich angehängt |
 | `native_notifications` | `true` | Web-Notifications auf OS-Notifications umleiten. `false` = WebView-Verhalten |
 | `close_to_tray` | `true` | `false` = Schließen beendet die App |
-| `overlay` | siehe oben | `accent_color` (`"#RRGGBB"` oder `null`), `tint`, `zoom`, `privacy_blur`, `custom_css`, `mods`, `always_on_top`, `panel_button`, am einfachsten über das Overlay-Menü |
+| `overlay` | siehe oben | `accent_color` (`"#RRGGBB"` oder `null`), `border_tint`, `tint`, `zoom`, `privacy_blur`, `custom_css`, `mods`, `always_on_top`, `panel_button`, am einfachsten über das Overlay-Menü |
 
 Kaputtes JSON führt nicht zum Absturz, die App startet dann mit Defaults und schreibt eine Warnung auf stderr.
 

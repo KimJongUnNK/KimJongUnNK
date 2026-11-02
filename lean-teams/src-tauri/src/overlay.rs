@@ -89,9 +89,11 @@ pub struct OverlayConfig {
     /// Accent color as "#RRGGBB" or "#RGB"; replaces Teams' purple
     /// everywhere (see theme.js).
     pub accent_color: Option<String>,
-    /// How much neutral backgrounds and borders are tinted toward the
-    /// accent, 0.0 to 0.4.
+    /// How much neutral backgrounds are tinted toward the accent, 0.0 to 0.4.
     pub tint: f64,
+    /// How much neutral borders and dividers are tinted toward the accent,
+    /// 0.0 (grey) to 1.0 (accent color).
+    pub border_tint: f64,
     /// Page zoom, 0.5 to 2.0. Ctrl/Cmd +/- works too.
     pub zoom: f64,
     /// Blur the whole window while it is not focused (screen sharing,
@@ -113,6 +115,7 @@ impl Default for OverlayConfig {
         Self {
             accent_color: None,
             tint: 0.0,
+            border_tint: 0.0,
             zoom: 1.0,
             privacy_blur: false,
             custom_css: true,
@@ -127,6 +130,14 @@ impl OverlayConfig {
     pub fn tint(&self) -> f64 {
         if self.tint.is_finite() {
             self.tint.clamp(0.0, 0.4)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn border_tint(&self) -> f64 {
+        if self.border_tint.is_finite() {
+            self.border_tint.clamp(0.0, 1.0)
         } else {
             0.0
         }
@@ -493,7 +504,11 @@ pub fn apply_script(css: &str) -> String {
 
 /// JavaScript that hands accent and tint to the theme engine (theme.js).
 pub fn theme_script(config: &OverlayConfig) -> String {
-    let args = serde_json::json!({ "accent": config.accent(), "tint": config.tint() });
+    let args = serde_json::json!({
+        "accent": config.accent(),
+        "tint": config.tint(),
+        "borderTint": config.border_tint(),
+    });
     format!("window.__leanTheme && window.__leanTheme.set({args});")
 }
 
@@ -686,11 +701,12 @@ mod tests {
         let config = OverlayConfig {
             accent_color: Some(" #ABC ".into()),
             tint: 0.9,
+            border_tint: 3.0,
             ..OverlayConfig::default()
         };
         assert_eq!(
             theme_script(&config),
-            r##"window.__leanTheme && window.__leanTheme.set({"accent":"#aabbcc","tint":0.4});"##
+            r##"window.__leanTheme && window.__leanTheme.set({"accent":"#aabbcc","borderTint":1.0,"tint":0.4});"##
         );
         let off = OverlayConfig {
             accent_color: Some("red".into()),

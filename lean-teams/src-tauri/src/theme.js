@@ -3,13 +3,20 @@
 //
 //  - scans every readable stylesheet (including the ones Teams' CSS-in-JS
 //    fills at runtime via insertRule) for CSS variables and color
-//    declarations whose value is Teams' purple brand hue,
-//  - re-emits them for the same selectors with the accent hue/saturation and
-//    the original lightness and alpha, so light and dark ramps stay intact,
-//  - optionally tints neutral greys (backgrounds, borders) toward the accent,
-//  - rescans when Teams adds styles, and cross-fades color changes.
+//    declarations,
+//  - recolors the ones in Teams' purple brand hue with the accent hue and
+//    saturation at the original lightness and alpha, so light and dark
+//    ramps stay intact,
+//  - optionally tints neutral greys toward the accent, separately for
+//    borders/lines and for backgrounds; text colors are never tinted,
+//  - rescans only when Teams adds styles.
 //
-// Controlled from Rust via window.__leanTheme.set({ accent, tint }).
+// Speed matters because the overlay menu calls set() on every frame while
+// a slider is dragged: the expensive scan is cached and only redone when the
+// stylesheets change; set() merely recomputes colors from the cache, once
+// per animation frame. Color changes cross-fade, but not while dragging.
+//
+// Controlled from Rust via window.__leanTheme.set({ accent, tint, borderTint }).
 (function () {
   "use strict";
   if (window.top !== window || window.__leanTheme) return;
@@ -17,16 +24,21 @@
   // Teams' purple sits around hue 235-240 in both light and dark themes.
   var BRAND_HUE_MIN = 222, BRAND_HUE_MAX = 258, BRAND_MIN_SAT = 0.16;
   var NEUTRAL_MAX_SAT = 0.08;
-  var COLOR_PROPS = {
-    "color": 1, "background-color": 1, "border-color": 1, "border-top-color": 1, "border-right-color": 1,
-    "border-bottom-color": 1, "border-left-color": 1, "outline-color": 1, "fill": 1, "stroke": 1,
-    "text-decoration-color": 1, "caret-color": 1, "column-rule-color": 1
+  // What a plain color property paints. Variables are classified by name.
+  var PROP_ROLES = {
+    "color": "text", "fill": "text", "stroke": "border", "caret-color": "text", "text-decoration-color": "text",
+    "background-color": "bg",
+    "border-color": "border", "border-top-color": "border", "border-right-color": "border",
+    "border-bottom-color": "border", "border-left-color": "border", "outline-color": "border",
+    "column-rule-color": "border"
   };
-  var FADE_CSS = "html.lean-theme-fade, html.lean-theme-fade * { transition: background-color .35s ease, color .35s ease," +
-    " border-color .35s ease, fill .35s ease, stroke .35s ease, box-shadow .35s ease !important; }\n";
+  var FADE_CSS = "html.lean-theme-fade, html.lean-theme-fade * { transition: background-color .3s ease, color .3s ease," +
+    " border-color .3s ease, fill .3s ease, stroke .3s ease !important; }\n";
+  var DRAG_GAP_MS = 250;
 
-  var config = { accent: null, tint: 0 };
-  var sheet = null, fallback = null, signature = "", fadeTimer = 0, stats = { rules: 0, values: 0 };
+  var config = { accent: null, tint: 0, borderTint: 0 };
+  var sheet = null, fallback = null, signature = null, entries = [], frame = 0;
+  var fadeTimer = 0, lastSet = 0, stats = { rules: 0, values: 0, scans: 0 };
 
   // ---- colors -------------------------------------------------------------
   function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
@@ -74,25 +86,44 @@
       : "rgba(" + c.r + "," + c.g + "," + c.b + "," + Math.round(c.a * 1000) / 1000 + ")";
   }
 
-  function recolor(c, accent, tint) {
-    var hsl = toHsl(c);
-    if (hsl.s >= BRAND_MIN_SAT && hsl.h >= BRAND_HUE_MIN && hsl.h <= BRAND_HUE_MAX) {
-      // Keep how light/dark the shade was; take hue and saturation from the
-      // accent, scaled so pale tints stay pale.
-      var sat = clamp01(accent.s * Math.min(1.25, hsl.s / 0.55));
-      return fromHsl(accent.h, sat, hsl.l, c.a);
-    }
-    if (tint > 0 && hsl.s <= NEUTRAL_MAX_SAT) {
-      var rgb = accent.rgb;
-      return {
-        r: Math.round(c.r + (rgb.r - c.r) * tint), g: Math.round(c.g + (rgb.g - c.g) * tint),
-        b: Math.round(c.b + (rgb.b - c.b) * tint), a: c.a
-      };
-    }
+  function mix(c, to, t) {
+    return {
+      r: Math.round(c.r + (to.r - c.r) * t), g: Math.round(c.g + (to.g - c.g) * t),
+      b: Math.round(c.b + (to.b - c.b) * t), a: c.a
+    };
+  }
+
+  function roleOf(name) {
+    if (name.indexOf("--") !== 0) return PROP_ROLES[name] || null;
+    var n = name.toLowerCase();
+    if (/stroke|border|divider|outline|separator|ring/.test(n)) return "border";
+    if (/foreground|text|icon|font/.test(n)) return "text";
+    if (/background|surface|canvas|layer/.test(n)) return "bg";
     return null;
   }
 
-  // ---- scanning -----------------------------------------------------------
+  // "brand" for Teams purple, the role for a neutral grey, else null.
+  function kindOf(color, role) {
+    var hsl = toHsl(color);
+    if (hsl.s >= BRAND_MIN_SAT && hsl.h >= BRAND_HUE_MIN && hsl.h <= BRAND_HUE_MAX) return "brand";
+    if (hsl.s <= NEUTRAL_MAX_SAT && (role === "bg" || role === "border")) return role;
+    return null;
+  }
+
+  function recolor(entry, accent, tint, borderTint) {
+    var c = entry.color;
+    if (entry.kind === "brand") {
+      // Keep how light/dark the shade was; take hue and saturation from the
+      // accent, scaled so pale tints stay pale.
+      var sat = clamp01(accent.s * Math.min(1.25, entry.s / 0.55));
+      return fromHsl(accent.h, sat, entry.l, c.a);
+    }
+    if (entry.kind === "border" && borderTint > 0) return mix(c, accent.rgb, borderTint);
+    if (entry.kind === "bg" && tint > 0) return mix(c, accent.rgb, tint);
+    return null;
+  }
+
+  // ---- scanning (expensive, cached) ----------------------------------------
   function sheets() {
     var list = Array.prototype.slice.call(document.styleSheets);
     var adopted = document.adoptedStyleSheets || [];
@@ -118,37 +149,52 @@
     }
   }
 
-  function build() {
-    stats = { rules: 0, values: 0 };
-    if (!config.accent) return FADE_CSS;
-    var base = parseColor(config.accent);
-    if (!base) return FADE_CSS;
-    var accent = toHsl(base);
-    accent.rgb = base;
-    var tint = clamp01(config.tint || 0);
-    var out = [FADE_CSS];
-
+  function scan() {
+    var found = [];
     sheets().forEach(function (s) {
       var rules = rulesOf(s);
       if (!rules) return;
       walk(rules, function (rule) {
-        var decls = [];
-        var style = rule.style;
+        var style = rule.style, decls = null;
         for (var i = 0; i < style.length; i++) {
           var name = style[i];
-          if (name.indexOf("--") !== 0 && !COLOR_PROPS[name]) continue;
+          if (name.indexOf("--") !== 0 && !PROP_ROLES[name]) continue;
           var color = parseColor(style.getPropertyValue(name));
           if (!color) continue;
-          var next = recolor(color, accent, tint);
-          if (next) decls.push(name + ":" + css(next) + " !important");
+          var kind = kindOf(color, roleOf(name));
+          if (!kind) continue;
+          var hsl = toHsl(color);
+          (decls || (decls = [])).push({ name: name, color: color, kind: kind, s: hsl.s, l: hsl.l });
         }
-        if (decls.length) {
-          stats.rules += 1;
-          stats.values += decls.length;
-          out.push(rule.selectorText + "{" + decls.join(";") + "}");
-        }
+        if (decls) found.push({ selector: rule.selectorText, decls: decls });
       });
     });
+    entries = found;
+    stats.scans += 1;
+  }
+
+  // ---- building (cheap, from the cache) ------------------------------------
+  function build() {
+    stats.rules = 0;
+    stats.values = 0;
+    var base = config.accent && parseColor(config.accent);
+    if (!base) return FADE_CSS;
+    var accent = toHsl(base);
+    accent.rgb = base;
+    var tint = clamp01(config.tint), borderTint = clamp01(config.borderTint);
+    var out = [FADE_CSS];
+    for (var i = 0; i < entries.length; i++) {
+      var decls = entries[i].decls, parts = [];
+      for (var j = 0; j < decls.length; j++) {
+        var next = recolor(decls[j], accent, tint, borderTint);
+        if (next) parts.push(decls[j].name + ":" + css(next) + " !important");
+      }
+      if (parts.length) {
+        stats.rules += 1;
+        stats.values += parts.length;
+        out.push(entries[i].selector + "{" + parts.join(";") + "}");
+      }
+    }
     return out.join("\n");
   }
 
@@ -169,11 +215,15 @@
     fallback.textContent = text;
   }
 
-  function refresh(force) {
+  // Rescan only if Teams' stylesheets changed; rebuild if anything changed.
+  function refresh(configChanged) {
     var sig = currentSignature();
-    if (!force && sig === signature) return;
-    signature = sig;
-    apply(build());
+    var rescanned = sig !== signature;
+    if (rescanned) {
+      signature = sig;
+      scan();
+    }
+    if (rescanned || configChanged) apply(build());
   }
 
   function fade() {
@@ -181,28 +231,42 @@
     if (!root) return;
     root.classList.add("lean-theme-fade");
     clearTimeout(fadeTimer);
-    fadeTimer = setTimeout(function () { root.classList.remove("lean-theme-fade"); }, 450);
+    fadeTimer = setTimeout(function () { root.classList.remove("lean-theme-fade"); }, 400);
   }
 
-  // Teams keeps inserting rules while it renders; cheap signature check,
-  // full rebuild only when something changed.
   setInterval(function () { if (config.accent) refresh(false); }, 1500);
   document.addEventListener("DOMContentLoaded", function () { refresh(true); });
   window.addEventListener("load", function () { refresh(true); });
 
   window.__leanTheme = {
     set: function (next) {
-      var changed = next.accent !== config.accent || next.tint !== config.tint;
-      config = { accent: next.accent || null, tint: Number(next.tint) || 0 };
-      if (changed) fade();
-      refresh(true);
+      var cfg = {
+        accent: next.accent || null,
+        tint: Number(next.tint) || 0,
+        borderTint: Number(next.borderTint) || 0
+      };
+      if (cfg.accent === config.accent && cfg.tint === config.tint && cfg.borderTint === config.borderTint) return;
+      var now = Date.now();
+      // A single click cross-fades; a slider drag updates instantly.
+      if (now - lastSet > DRAG_GAP_MS) fade();
+      lastSet = now;
+      config = cfg;
+      if (typeof requestAnimationFrame !== "function") return refresh(true);
+      if (frame) return;
+      frame = requestAnimationFrame(function () { frame = 0; refresh(true); });
     },
-    stats: function () { return { rules: stats.rules, values: stats.values, accent: config.accent }; },
+    stats: function () {
+      return { rules: stats.rules, values: stats.values, scans: stats.scans, accent: config.accent };
+    },
     _parse: parseColor,
-    _recolor: function (text, accent, tint) {
-      var a = parseColor(accent), hsl = toHsl(a);
+    _role: roleOf,
+    _recolor: function (text, accent, tint, borderTint, name) {
+      var color = parseColor(text), a = parseColor(accent), hsl = toHsl(a);
       hsl.rgb = a;
-      var c = recolor(parseColor(text), hsl, tint || 0);
+      var kind = kindOf(color, roleOf(name || "background-color"));
+      if (!kind) return null;
+      var own = toHsl(color);
+      var c = recolor({ color: color, kind: kind, s: own.s, l: own.l }, hsl, tint || 0, borderTint || 0);
       return c && css(c);
     }
   };
