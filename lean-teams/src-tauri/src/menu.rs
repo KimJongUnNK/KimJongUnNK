@@ -7,7 +7,10 @@
 //! that write settings: it may only open the menu.
 
 use crate::{config::Config, overlay, AppState, MAIN};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use tauri::{
     AppHandle, LogicalPosition, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
@@ -101,6 +104,10 @@ fn panel_position<R: Runtime>(main: &WebviewWindow<R>) -> Option<(f64, f64)> {
 /// shortcut during creation does not try to build it twice.
 static CREATING: AtomicBool = AtomicBool::new(false);
 
+/// Why the menu window could not be created, if it failed (for the
+/// self-test report; release builds on Windows have no console for stderr).
+static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
 fn show_panel<R: Runtime>(panel: &WebviewWindow<R>, position: Option<(f64, f64)>) {
     // Position after show: some window managers ignore it on hidden windows.
     let _ = panel.show();
@@ -112,7 +119,12 @@ fn show_panel<R: Runtime>(panel: &WebviewWindow<R>, position: Option<(f64, f64)>
 
 fn create_panel<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     let main = main_window(app).ok_or(tauri::Error::WindowNotFound)?;
-    WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()))
+    let builder = WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("panel.html".into()));
+    // All webviews of one app share a WebView2 environment, which only
+    // opens if they use the same browser arguments as the Teams window.
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(&app.state::<AppState>().config.browser_args());
+    builder
         .title("Lean Teams Overlay")
         .inner_size(PANEL_WIDTH, PANEL_HEIGHT)
         .resizable(false)
@@ -154,7 +166,10 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>) {
     std::thread::spawn(move || {
         match create_panel(&app) {
             Ok(panel) => show_panel(&panel, position),
-            Err(err) => eprintln!("lean-teams: could not open overlay menu: {err}"),
+            Err(err) => {
+                eprintln!("lean-teams: could not open overlay menu: {err}");
+                *LAST_ERROR.lock().unwrap() = Some(err.to_string());
+            }
         }
         CREATING.store(false, Ordering::Release);
     });
@@ -212,7 +227,10 @@ visible: document.visibilityState})";
                 });
             }
             None => {
-                let _ = std::fs::write(&out, "{\"error\":\"menu window missing\"}");
+                let reason = LAST_ERROR.lock().unwrap().clone().unwrap_or_default();
+                let report =
+                    serde_json::json!({ "error": "menu window missing", "reason": reason });
+                let _ = std::fs::write(&out, report.to_string());
                 app.exit(1);
             }
         }
