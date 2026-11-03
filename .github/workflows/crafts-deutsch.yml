@@ -3,8 +3,9 @@
 # Jede Nacht: Haben die Originale (storytold/*) eine neue Version, werden die Patches aus
 # crafts-deutsch/patches mit `git am -3` darauf gelegt, getestet, für macOS (Apple Silicon + Intel)
 # und Windows gebaut und im Release "crafts-deutsch" ausgetauscht. Passt ein Patch nicht mehr oder
-# scheitert ein Test, bleibt der letzte funktionierende Download stehen und ein Issue mit dem Label
-# `crafts-deutsch-kaputt` wird geöffnet; die geplante Claude-Aufgabe repariert den Patch.
+# scheitert ein Test, bleibt der letzte funktionierende Download stehen, der Fehler steht in
+# versions.json (.broken) und in den Release-Notizen (bei eingeschalteten Issues zusätzlich als Issue
+# mit dem Label `crafts-deutsch-kaputt`); die geplante Claude-Aufgabe repariert den Patch.
 name: crafts-deutsch
 
 on:
@@ -58,7 +59,15 @@ jobs:
             shas=$(jq -c --arg a "$app" --arg s "$sha" --arg p "$patch" '.[$a] = {sha: $s, patch: $p}' <<<"$shas")
             old_sha=$(jq -r --arg a "$app" '.[$a].sha // ""' old.json)
             old_patch=$(jq -r --arg a "$app" '.[$a].patch // ""' old.json)
-            if [ "$EVENT" != schedule ] || [ "${FORCE:-false}" = true ] || [ "$sha" != "$old_sha" ] || [ "$patch" != "$old_patch" ]; then
+            # Schon als kaputt gemeldet, und weder Original noch Patch haben sich seitdem geändert?
+            failed=$(jq -r --arg a "$app" --arg s "$sha" --arg p "$patch" \
+              '(.broken[$a] // {}) | if .sha == $s and .patch == $p then "ja" else "" end' old.json)
+            if [ "$EVENT" != schedule ] || [ "${FORCE:-false}" = true ]; then
+              build=$(jq -c --arg a "$app" '. + [$a]' <<<"$build")
+              echo "$app: neu bauen (Original ${sha:0:12})"
+            elif [ -n "$failed" ]; then
+              echo "$app: wartet auf Reparatur (Original ${sha:0:12} ist schon gescheitert)"
+            elif [ "$sha" != "$old_sha" ] || [ "$patch" != "$old_patch" ]; then
               build=$(jq -c --arg a "$app" '. + [$a]' <<<"$build")
               echo "$app: neu bauen (Original ${sha:0:12}, vorher ${old_sha:0:12})"
             else
@@ -254,7 +263,13 @@ jobs:
           set -euo pipefail
           mkdir -p dl
           gh release download "$TAG" -p versions.json -O versions.json 2>/dev/null || echo '{}' > versions.json
-          gh label create crafts-deutsch-kaputt --color B60205 --description "Automatische Aktualisierung gescheitert" --force >/dev/null
+          # Issues sind optional: Ist der Issue-Tab im Repo aus, steht der Fehler nur in
+          # versions.json (.broken) und in den Release-Notizen, der Workflow-Lauf ist rot.
+          issues=$(gh repo view "$GITHUB_REPOSITORY" --json hasIssuesEnabled --jq .hasIssuesEnabled 2>/dev/null || echo false)
+          if [ "$issues" = true ]; then
+            gh label create crafts-deutsch-kaputt --color B60205 --description "Automatische Aktualisierung gescheitert" --force >/dev/null || issues=false
+          fi
+          today=$(date -u +%Y-%m-%d)
           files=()
           for app in $(jq -r '.[]' <<<"$BUILD"); do
             case "$app" in wordcraft) N=WordCraft ;; deckcraft) N=DeckCraft ;; filmcraft) N=FilmCraft ;; esac
@@ -264,17 +279,31 @@ jobs:
             for f in "$N-Deutsch-macOS.zip" "$N-Deutsch-Windows-x64.zip"; do
               if [ -f "dl/$f" ]; then files+=("dl/$f"); else ok=false; fi
             done
-            title="crafts-deutsch: $N lässt sich nicht mehr automatisch aktualisieren"
-            open=$(gh issue list --label crafts-deutsch-kaputt --state open --search "$N in:title" --json number --jq '.[0].number // empty')
+            open=""
+            if [ "$issues" = true ]; then
+              open=$(gh issue list --label crafts-deutsch-kaputt --state open --search "$N in:title" --json number --jq '.[0].number // empty' || true)
+            fi
             if $ok; then
-              jq --arg a "$app" --arg s "$sha" --arg p "$patch" --arg d "$(date -u +%Y-%m-%d)" '.[$a] = {sha: $s, patch: $p, date: $d}' versions.json > v && mv v versions.json
-              if [ -n "$open" ]; then gh issue close "$open" --comment "Wieder grün: $N ist auf storytold/$app ${sha:0:12} aktualisiert ($RUN)."; fi
+              jq --arg a "$app" --arg s "$sha" --arg p "$patch" --arg d "$today" \
+                '.[$a] = {sha: $s, patch: $p, date: $d} | del(.broken[$a]) | if .broken == {} then del(.broken) else . end' \
+                versions.json > v && mv v versions.json
+              if [ -n "$open" ]; then gh issue close "$open" --comment "Wieder grün: $N ist auf storytold/$app ${sha:0:12} aktualisiert ($RUN)." || true; fi
             else
-              body=$(printf '%s\n\n%s\n\n%s' \
-                "Die nächtliche Aktualisierung von **$N** auf [storytold/$app@${sha:0:12}](https://github.com/storytold/$app/commit/$sha) ist gescheitert: Patch passt nicht mehr, Test oder Build rot. Der letzte funktionierende Download bleibt im Release." \
-                "Log: $RUN" \
-                "Die geplante Claude-Aufgabe repariert \`crafts-deutsch/patches/$app.patch\` und öffnet dafür einen PR.")
-              if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$title" --label crafts-deutsch-kaputt --body "$body"; fi
+              echo "::error::$N: Patch passt nicht mehr, Test oder Build rot. Der letzte funktionierende Download bleibt."
+              jq --arg a "$app" --arg s "$sha" --arg p "$patch" --arg d "$today" --arg r "$RUN" \
+                '.broken[$a] = {sha: $s, patch: $p, date: $d, run: $r}' versions.json > v && mv v versions.json
+              if [ "$issues" = true ]; then
+                title="crafts-deutsch: $N lässt sich nicht mehr automatisch aktualisieren"
+                body=$(printf '%s\n\n%s\n\n%s' \
+                  "Die nächtliche Aktualisierung von **$N** auf [storytold/$app@${sha:0:12}](https://github.com/storytold/$app/commit/$sha) ist gescheitert: Patch passt nicht mehr, Test oder Build rot. Der letzte funktionierende Download bleibt im Release." \
+                  "Log: $RUN" \
+                  "Die geplante Claude-Aufgabe repariert \`crafts-deutsch/patches/$app.patch\` und öffnet dafür einen PR.")
+                if [ -n "$open" ]; then
+                  gh issue comment "$open" --body "$body" || true
+                else
+                  gh issue create --title "$title" --label crafts-deutsch-kaputt --body "$body" || true
+                fi
+              fi
             fi
           done
           {
@@ -286,9 +315,11 @@ jobs:
             echo "|---|---|---|"
             for app in wordcraft deckcraft filmcraft; do
               s=$(jq -r --arg a "$app" '.[$a].sha // ""' versions.json); d=$(jq -r --arg a "$app" '.[$a].date // "–"' versions.json)
-              [ -n "$s" ] && echo "| $app | [${s:0:12}](https://github.com/storytold/$app/commit/$s) | $d |"
+              if [ -n "$s" ]; then echo "| $app | [${s:0:12}](https://github.com/storytold/$app/commit/$s) | $d |"; fi
             done
             echo
+            jq -r '(.broken // {}) | to_entries[]
+              | "> [!NOTE]\n> **\(.key)**: Die neueste Original-Version ([\(.value.sha[0:12])](https://github.com/storytold/\(.key)/commit/\(.value.sha))) ließ sich am \(.value.date) nicht übernehmen ([Log](\(.value.run))). Der Download oben ist die letzte funktionierende Version; die Reparatur läuft automatisch.\n"' versions.json
             echo "Wird jede Nacht automatisch an neue Versionen der Originale angepasst."
           } > notes.md
           title="WordCraft & DeckCraft – German Version · FilmCraft – Filmora Edition (modifiziert, inoffiziell)"
