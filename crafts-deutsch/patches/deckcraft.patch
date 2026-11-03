@@ -1,4 +1,4 @@
-From 6d766b9676ea1fb1adee211931741f4620925b0c Mon Sep 17 00:00:00 2001
+From 8ee2a3326d03e6f24d89fb78ea09fe04f90a1479 Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 01:22:31 +0000
 Subject: [PATCH] German spelling: compounds, de-AT, and the system language as
@@ -27,28 +27,15 @@ flagged; new text was always checked as US English.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
 ---
- Cargo.lock                             |   1 +
  crates/engine/Cargo.toml               |   2 +
  crates/engine/src/spell.rs             | 634 +++++++++++++++++++++----
  crates/ui-egui/src/canvas/squiggles.rs |   3 +-
  crates/ui-egui/src/dialogs/language.rs |   6 +-
  crates/ui-egui/src/status.rs           |   7 +-
- 6 files changed, 560 insertions(+), 93 deletions(-)
+ 5 files changed, 559 insertions(+), 93 deletions(-)
 
-diff --git a/Cargo.lock b/Cargo.lock
-index 408e999..95e27b5 100644
---- a/Cargo.lock
-+++ b/Cargo.lock
-@@ -1068,6 +1068,7 @@ dependencies = [
-  "log",
-  "serde",
-  "serde_json",
-+ "sys-locale",
-  "thiserror 2.0.21",
-  "zip 3.0.0",
- ]
 diff --git a/crates/engine/Cargo.toml b/crates/engine/Cargo.toml
-index cb1f4c2..1e05a42 100644
+index cb1f4c29..1e05a423 100644
 --- a/crates/engine/Cargo.toml
 +++ b/crates/engine/Cargo.toml
 @@ -24,6 +24,8 @@ serde_json = { workspace = true }
@@ -61,7 +48,7 @@ index cb1f4c2..1e05a42 100644
  chrono = { workspace = true }
  
 diff --git a/crates/engine/src/spell.rs b/crates/engine/src/spell.rs
-index 93852e3..e1ec50a 100644
+index 2dda5c6f..65922235 100644
 --- a/crates/engine/src/spell.rs
 +++ b/crates/engine/src/spell.rs
 @@ -3,8 +3,15 @@
@@ -619,7 +606,7 @@ index 93852e3..e1ec50a 100644
      for d in dirs {
          if let Some(p) = pair(d, &base) {
              return Some(p);
-@@ -735,7 +992,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
+@@ -742,7 +999,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
          let mut k = a;
          for part in text.split('-') {
              let n = part.chars().count();
@@ -629,7 +616,7 @@ index 93852e3..e1ec50a 100644
                  && let Some(c) = chars.get(k)
              {
                  if p.runs.get(c.1).is_some_and(|r| r.props.no_proof == Some(true)) {
-@@ -957,4 +1216,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
+@@ -978,4 +1237,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
          assert_eq!(stem("fr-FR"), None);
          let _ = std::fs::remove_dir_all(&dir);
      }
@@ -834,7 +821,7 @@ index 93852e3..e1ec50a 100644
 +    }
  }
 diff --git a/crates/ui-egui/src/canvas/squiggles.rs b/crates/ui-egui/src/canvas/squiggles.rs
-index 30a94a2..e3a6716 100644
+index 30a94a25..e3a67164 100644
 --- a/crates/ui-egui/src/canvas/squiggles.rs
 +++ b/crates/ui-egui/src/canvas/squiggles.rs
 @@ -165,7 +165,7 @@ fn default_lang(st: &DocState) -> String {
@@ -855,7 +842,7 @@ index 30a94a2..e3a6716 100644
      ("Italiano", "it-IT"),
      ("Nederlands", "nl-NL"),
 diff --git a/crates/ui-egui/src/dialogs/language.rs b/crates/ui-egui/src/dialogs/language.rs
-index 11b941c..d73fb35 100644
+index 11b941c5..d73fb353 100644
 --- a/crates/ui-egui/src/dialogs/language.rs
 +++ b/crates/ui-egui/src/dialogs/language.rs
 @@ -1,9 +1,9 @@
@@ -878,7 +865,7 @@ index 11b941c..d73fb35 100644
 +    (props.lang.unwrap_or_else(deckcraft_engine::spell::fallback_lang), props.no_proof == Some(true))
  }
 diff --git a/crates/ui-egui/src/status.rs b/crates/ui-egui/src/status.rs
-index 0301af4..2a78b26 100644
+index 0301af44..2a78b261 100644
 --- a/crates/ui-egui/src/status.rs
 +++ b/crates/ui-egui/src/status.rs
 @@ -222,7 +222,12 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {

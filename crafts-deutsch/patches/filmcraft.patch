@@ -1,7 +1,7 @@
-From 3724212b30463230f0ebb9ad20bb5da6d160ff35 Mon Sep 17 00:00:00 2001
+From f53365e8a82421c08ca91a4da5fd56c64a0144db Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 19:00:40 +0000
-Subject: [PATCH] Import Wondershare Filmora projects (.wfp)
+Subject: [PATCH 1/2] Import Wondershare Filmora projects (.wfp)
 
 File > Import (and the Media Browser, and drag and drop) read Filmora 9+
 projects: a ZIP whose timeline.wesproj is JSON in 100 ns units.
@@ -21,7 +21,6 @@ projects: a ZIP whose timeline.wesproj is JSON in 100 ns units.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
 ---
- Cargo.lock                                |   1 +
  crates/engine/src/filmora_import_tests.rs |  82 ++
  crates/engine/src/interchange.rs          |   5 +-
  crates/engine/src/lib.rs                  |   2 +
@@ -31,25 +30,13 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
  crates/interchange/src/lib.rs             |  22 +-
  crates/ui-egui/src/app/files.rs           |   2 +-
  docs/file-format-parity.md                |   1 +
- 10 files changed, 1008 insertions(+), 6 deletions(-)
+ 9 files changed, 1007 insertions(+), 6 deletions(-)
  create mode 100644 crates/engine/src/filmora_import_tests.rs
  create mode 100644 crates/interchange/src/filmora.rs
 
-diff --git a/Cargo.lock b/Cargo.lock
-index 5be8eae..cbb010e 100644
---- a/Cargo.lock
-+++ b/Cargo.lock
-@@ -2243,6 +2243,7 @@ dependencies = [
-  "filmcraft-media",
-  "filmcraft-project",
-  "filmcraft-time",
-+ "miniz_oxide 0.8.9",
-  "proptest",
-  "roxmltree",
-  "serde",
 diff --git a/crates/engine/src/filmora_import_tests.rs b/crates/engine/src/filmora_import_tests.rs
 new file mode 100644
-index 0000000..ec2cb67
+index 00000000..ec2cb67b
 --- /dev/null
 +++ b/crates/engine/src/filmora_import_tests.rs
 @@ -0,0 +1,82 @@
@@ -136,7 +123,7 @@ index 0000000..ec2cb67
 +    let _ = std::fs::remove_dir_all(&d);
 +}
 diff --git a/crates/engine/src/interchange.rs b/crates/engine/src/interchange.rs
-index 7e97f59..0d0db55 100644
+index fb828bc1..579f01ce 100644
 --- a/crates/engine/src/interchange.rs
 +++ b/crates/engine/src/interchange.rs
 @@ -1,4 +1,5 @@
@@ -156,7 +143,7 @@ index 7e97f59..0d0db55 100644
  /// The interchange format of a file, if it is one (by content, with the extension as a hint).
  pub fn detect(path: &str, bytes: &[u8]) -> Option<Format> {
 diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
-index 56d05b7..3a29bdf 100644
+index 56d05b70..3a29bdf3 100644
 --- a/crates/engine/src/lib.rs
 +++ b/crates/engine/src/lib.rs
 @@ -1362,6 +1362,8 @@ mod export_tests;
@@ -169,7 +156,7 @@ index 56d05b7..3a29bdf 100644
  #[cfg(test)]
  mod history_tests;
 diff --git a/crates/engine/src/media_browser.rs b/crates/engine/src/media_browser.rs
-index 6fdda50..280ee6f 100644
+index 6fdda50a..280ee6f7 100644
 --- a/crates/engine/src/media_browser.rs
 +++ b/crates/engine/src/media_browser.rs
 @@ -78,7 +78,7 @@ pub const DEFAULT_COLUMNS: [&str; 5] = ["Name", "Frame Rate", "Media Duration",
@@ -182,7 +169,7 @@ index 6fdda50..280ee6f 100644
  const RECENT_MAX: usize = 10;
  
 diff --git a/crates/interchange/Cargo.toml b/crates/interchange/Cargo.toml
-index 3eecc49..78156e8 100644
+index 3eecc494..78156e86 100644
 --- a/crates/interchange/Cargo.toml
 +++ b/crates/interchange/Cargo.toml
 @@ -20,6 +20,8 @@ serde = { workspace = true }
@@ -196,7 +183,7 @@ index 3eecc49..78156e8 100644
  proptest = { workspace = true }
 diff --git a/crates/interchange/src/filmora.rs b/crates/interchange/src/filmora.rs
 new file mode 100644
-index 0000000..309d372
+index 00000000..309d3726
 --- /dev/null
 +++ b/crates/interchange/src/filmora.rs
 @@ -0,0 +1,895 @@
@@ -1096,7 +1083,7 @@ index 0000000..309d372
 +    }
 +}
 diff --git a/crates/interchange/src/lib.rs b/crates/interchange/src/lib.rs
-index 8daeca6..a9a7b4d 100644
+index 8daeca64..a9a7b4d2 100644
 --- a/crates/interchange/src/lib.rs
 +++ b/crates/interchange/src/lib.rs
 @@ -7,7 +7,8 @@
@@ -1192,7 +1179,7 @@ index 8daeca6..a9a7b4d 100644
      Ok((text.into_bytes(), report))
  }
 diff --git a/crates/ui-egui/src/app/files.rs b/crates/ui-egui/src/app/files.rs
-index 137f5d4..7c56962 100644
+index 137f5d4f..7c569623 100644
 --- a/crates/ui-egui/src/app/files.rs
 +++ b/crates/ui-egui/src/app/files.rs
 @@ -15,7 +15,7 @@ impl FilmcraftApp {
@@ -1205,7 +1192,7 @@ index 137f5d4..7c56962 100644
                      .collect();
                  let bin = params.get("bin").cloned();
 diff --git a/docs/file-format-parity.md b/docs/file-format-parity.md
-index 029729c..357862e 100644
+index 029729c4..357862e6 100644
 --- a/docs/file-format-parity.md
 +++ b/docs/file-format-parity.md
 @@ -21,6 +21,7 @@ only). "Tested" names the evidence.
@@ -1216,6 +1203,132 @@ index 029729c..357862e 100644
  | Avid Log Exchange (ALE) | write | no | yes | — | 70% |
  | Marker CSV / text | write | — | yes (#454) | — | 80% |
  | Selection as project | Premiere project | — | `.fcproj` only | — | 50% |
+-- 
+2.43.0
+
+
+From e1b10c97920dc7945191559819bb12d5cbfdcdeb Mon Sep 17 00:00:00 2001
+From: Emil Boenke <boenkeemil@gmail.com>
+Date: Tue, 3 Nov 2026 00:29:12 +0000
+Subject: [PATCH 2/2] Open Filmora projects with File > Open and by dropping
+ them
+
+File > Open accepted only .fcproj, so a .wfp could only be imported into the
+open project. File > Open and a drop now open a .wfp as its own untitled
+project showing its timeline; saving writes a .fcproj, never the .wfp.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ apps/filmcraft/src/main.rs                |  3 ++-
+ crates/engine/src/commands.rs             | 24 ++++++++++++++++++++++
+ crates/engine/src/filmora_import_tests.rs | 25 +++++++++++++++++++++++
+ crates/ui-egui/src/app/input.rs           |  3 ++-
+ 4 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/apps/filmcraft/src/main.rs b/apps/filmcraft/src/main.rs
+index 34eb7e24..0914da21 100644
+--- a/apps/filmcraft/src/main.rs
++++ b/apps/filmcraft/src/main.rs
+@@ -353,7 +353,8 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
+         }));
+         app.hooks.pick_open_project = Some(Box::new(|| {
+             rfd::FileDialog::new()
+-                .add_filter(filmcraft_ui_egui::i18n::t("FilmCraft Project"), &file_filters::extensions(&["fcproj"]))
++                .add_filter(filmcraft_ui_egui::i18n::t("FilmCraft or Filmora Project"), &file_filters::extensions(&["fcproj", "wfp"]))
++                .add_filter(filmcraft_ui_egui::i18n::t("Filmora Project"), &file_filters::extensions(&["wfp"]))
+                 // #1644: where the system MIME database doesn't know `.fcproj`, the project
+                 // filter hides every saved project; "All files" keeps them reachable.
+                 .add_filter(filmcraft_ui_egui::i18n::t("All files"), &file_filters::all_files())
+diff --git a/crates/engine/src/commands.rs b/crates/engine/src/commands.rs
+index c0f17b8b..c1d272d4 100644
+--- a/crates/engine/src/commands.rs
++++ b/crates/engine/src/commands.rs
+@@ -5219,6 +5219,11 @@ pub(crate) fn install_project(s: &mut Session, proj: filmcraft_project::Project,
+ 
+ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
+     let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
++    // A Filmora project opens as a new, unsaved FilmCraft project holding its timeline.
++    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
++    if filmcraft_interchange::detect(&bytes, ext.as_deref()) == Some(filmcraft_interchange::Format::Filmora) {
++        return open_filmora(s, path, &bytes);
++    }
+     let loaded = filmcraft_format::decode(&bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+     let (from, migrated) = (loaded.schema_version, loaded.migrated());
+     crate::masks::discard_jobs(s);
+@@ -5239,6 +5244,25 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
+     Ok(json!({"path": path, "schemaVersion": from, "migrated": migrated, "missingMedia": missing}))
+ }
+ 
++/// File ▸ Open on a Filmora project (`.wfp`): a new untitled project named after it, its timeline
++/// imported and shown. Saving asks where to put the `.fcproj`; the `.wfp` is never written.
++fn open_filmora(s: &mut Session, path: &str, bytes: &[u8]) -> Result<Value> {
++    let name = std::path::Path::new(path).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Filmora Project".into());
++    crate::masks::discard_jobs(s);
++    if s.path.is_some() {
++        s.previews.reset_temp();
++    }
++    install_project(s, filmcraft_project::Project::new(&name), None, true);
++    let imported = crate::interchange::import(s, path, bytes, filmcraft_interchange::Format::Filmora, None)?;
++    let first = imported["sequences"].as_array().and_then(|a| a.first()).and_then(Value::as_u64).map(ItemId);
++    if let Some(seq) = first {
++        s.state.active_sequence = Some(seq);
++        s.state.open_sequences = Some(seq).into_iter().collect();
++        s.events.push(crate::Event::OpenSequence(seq));
++    }
++    Ok(json!({"path": path, "filmora": true, "sequence": first.map(|i| i.0), "import": imported}))
++}
++
+ /// Load a recovery candidate (newest when `id` is None) as the current, unsaved project.
+ fn recover(s: &mut Session, id: Option<&str>) -> Result<Value> {
+     let per = s.persistence.as_ref().ok_or_else(|| EngineError::Other("recovery is not running".into()))?;
+diff --git a/crates/engine/src/filmora_import_tests.rs b/crates/engine/src/filmora_import_tests.rs
+index ec2cb67b..8e739089 100644
+--- a/crates/engine/src/filmora_import_tests.rs
++++ b/crates/engine/src/filmora_import_tests.rs
+@@ -80,3 +80,28 @@ fn a_filmora_project_imports_with_its_clips_titles_and_media() {
+     assert_eq!(text.params["text"].value, filmcraft_project::ParamValue::Text("Aufwärmen an der Bar".into()));
+     let _ = std::fs::remove_dir_all(&d);
+ }
++
++/// File ▸ Open on a `.wfp` opens it as a new untitled project showing its timeline (#filmora-open):
++/// the project that was open is replaced, and saving asks for a `.fcproj` path.
++#[test]
++fn file_open_on_a_filmora_project_opens_its_timeline() {
++    let d = tmp_dir("filmora-open");
++    let timeline = r#"{"currentTimelineId":1,"timelineInfos":[{"timelineId":1,"frameRate":{"num":30,"den":1},"resolutionWidth":1080,"resolutionHeight":1920,"trackInfos":[
++        {"trackType":1,"clipList":[{"type":1,"filename":"file://Volumes/Gone/a.mov","sourceUuid":"a","inPoint":0,"outPoint":20000000,"tlBegin":0,"tlEnd":20000000}]}]}]}"#;
++    let wfp = d.join("Clubnacht.wfp");
++    let info = r#"{"timeline_mediaId":"M"}"#.to_string();
++    std::fs::write(&wfp, zip(&[("ProjectFolder/project_info.json", info), ("ProjectFolder/Medias/M/timeline.wesproj", timeline.to_string())])).unwrap();
++    let mut s = Session::default();
++    s.execute("file.newProject", json!({"name": "Old"})).unwrap();
++    let r = s.execute("file.open", json!({"path": wfp.to_string_lossy()})).unwrap();
++    assert_eq!(r["filmora"], true, "{r}");
++    assert_eq!(s.project.name, "Clubnacht");
++    assert!(s.path.is_none(), "the .wfp is not the project's file");
++    let seq = s.state.active_sequence.expect("the timeline is shown");
++    let q = s.project.sequence(seq).unwrap();
++    assert_eq!((q.settings.width, q.settings.height), (1080, 1920));
++    assert_eq!(q.video_tracks[0].items.len(), 1);
++    // Media that is not there stays offline and is reported, as for any import.
++    assert!(r["import"].to_string().contains("a.mov"), "{r}");
++    let _ = std::fs::remove_dir_all(&d);
++}
+diff --git a/crates/ui-egui/src/app/input.rs b/crates/ui-egui/src/app/input.rs
+index b85884b5..f769c687 100644
+--- a/crates/ui-egui/src/app/input.rs
++++ b/crates/ui-egui/src/app/input.rs
+@@ -118,7 +118,8 @@ impl FilmcraftApp {
+ 
+ /// Whether a dropped file is a FilmCraft project (opened, not imported).
+ fn is_project_file(path: &str) -> bool {
+-    std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("fcproj"))
++    // A dropped Filmora project opens like a FilmCraft one: as its own project, not merged into the open one.
++    std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("fcproj") || e.eq_ignore_ascii_case("wfp"))
+ }
+ 
+ /// A physical-pixel screen position as a point in the window's UI space, given the window's content origin in points.
 -- 
 2.43.0
 

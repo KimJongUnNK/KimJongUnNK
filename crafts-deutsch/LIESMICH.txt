@@ -1,0 +1,19 @@
+{TITLE} (modifiziert, inoffiziell)
+==========================================================
+
+ACHTUNG: Das ist eine inoffizielle, modifizierte Version, nicht die Original-App
+von ArtCraft / storytold. Fehler bitte nicht beim Original-Team melden.
+Originale: https://github.com/storytold
+
+Starten: {EXE} doppelklicken. Keine Installation nötig.
+Windows-Warnung: "Weitere Informationen" > "Trotzdem ausführen" (nicht signiert).
+
+Der Ordner "dictionaries" (falls vorhanden) muss neben {EXE} liegen bleiben:
+darin sind die deutschen Wörterbücher (Deutschland/Österreich, Schweiz).
+
+Neue Versionen: https://github.com/KimJongUnNK/KimJongUnNK/releases/tag/crafts-deutsch
+(wird jede Nacht automatisch an neue Versionen der Originale angepasst)
+
+Lizenzen: App MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE, NOTICE).
+Wörterbücher: GPLv2 oder GPLv3 (dictionaries/COPYING_GPLv2, COPYING_GPLv3),
+Quelle: https://github.com/LibreOffice/dictionaries/tree/master/de
