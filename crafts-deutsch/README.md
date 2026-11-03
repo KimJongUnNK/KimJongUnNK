@@ -36,10 +36,23 @@
 
 ## FilmCraft – Filmora Edition
 
+**Sieht aus wie Filmora:** Beim ersten Start Farbschema *Mint* (dunkles Blaugrau, Mint-Akzent, roter Abspielkopf) und Arbeitsbereich *Filmora Style*: Medien, Titel und Effekte links, Eigenschaften in der Mitte, Player rechts, Timeline unten. Umschalten: *Window › Workspaces* und *View › Appearance*.
+
 **File › Open** → deine `.wfp` wählen (oder ins Fenster ziehen). Sie geht als eigenes Projekt auf, *Speichern* legt ein `.fcproj` an, die `.wfp` bleibt unverändert.
 
-- Kommt mit: Clips, Schnitte, Spuren, Speed, Bilder, Titel (als Text), Position/Größe/Drehung, Lautstärke, Fades, Übergänge
-- Kommt nicht mit (wird beim Öffnen aufgelistet): Filmora-Effekte, Farbkorrektur, Masken, Pan & Zoom, KI-Funktionen
+| Filmora | wird in FilmCraft |
+|---|---|
+| Clips, Schnitte, Spuren, Speed, Bilder, Titel (als Text), Übergänge | dasselbe |
+| Position, Größe, Drehung | Motion |
+| Lautstärke, Stumm, Fades | Clip-Lautstärke, Blenden |
+| Pan & Zoom / Zuschneiden | Crop mit Zoom, animiert über den Clip |
+| Farbe › Anpassen (Temperatur, Tönung, Belichtung, Kontrast, Lichter, Schatten, Weiß, Schwarz, Sättigung, Vibrance) | Lumetri Color |
+| Helligkeit | Brightness & Contrast |
+| Schatten (Transformieren) | Drop Shadow |
+| Spiegeln, Schärfen, Chroma Key | Horizontal Flip, Sharpen, Ultra Key |
+
+- Stärken sind gleich, wo beide dieselbe Skala haben (−100…100), sonst angenähert (Belichtung, Schärfe, Schattenabstand): sieht nah dran aus, nicht pixelgleich
+- Kommt nicht mit (wird beim Öffnen aufgelistet): Filmoras eigene Effekte/Filter/LUTs, Masken, KI-Funktionen, Speed-Rampen (werden Durchschnitts-Speed)
 - Videos müssen am gleichen Ort liegen wie in Filmora (sonst *Medien verknüpfen*)
 
 ## Quellcode

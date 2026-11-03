@@ -1,7 +1,7 @@
-From f53365e8a82421c08ca91a4da5fd56c64a0144db Mon Sep 17 00:00:00 2001
+From ee63b1089efc9afb150d6aa4b97b1ab9f70f13eb Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 19:00:40 +0000
-Subject: [PATCH 1/2] Import Wondershare Filmora projects (.wfp)
+Subject: [PATCH 1/4] Import Wondershare Filmora projects (.wfp)
 
 File > Import (and the Media Browser, and drag and drop) read Filmora 9+
 projects: a ZIP whose timeline.wesproj is JSON in 100 ns units.
@@ -1207,10 +1207,10 @@ index 029729c4..357862e6 100644
 2.43.0
 
 
-From e1b10c97920dc7945191559819bb12d5cbfdcdeb Mon Sep 17 00:00:00 2001
+From cecbbbe52e1d89492b60b58c4c882c2a7ab436ba Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Tue, 3 Nov 2026 00:29:12 +0000
-Subject: [PATCH 2/2] Open Filmora projects with File > Open and by dropping
+Subject: [PATCH 2/4] Open Filmora projects with File > Open and by dropping
  them
 
 File > Open accepted only .fcproj, so a .wfp could only be imported into the
@@ -1329,6 +1329,988 @@ index b85884b5..f769c687 100644
  }
  
  /// A physical-pixel screen position as a point in the window's UI space, given the window's content origin in points.
+-- 
+2.43.0
+
+
+From 6dccc5c3e72a1042db53195ec3f1e65c1dc7897d Mon Sep 17 00:00:00 2001
+From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 15:42:43 +0000
+Subject: [PATCH 3/4] Filmora import: carry colour, Pan & Zoom, shadows, keys,
+ sharpen and flips
+
+The effects Filmora projects use most now arrive as FilmCraft effects
+instead of being listed as skipped:
+
+- Crop / Pan & Zoom (a source rectangle per keyframe) -> Crop with Zoom,
+  keyframed over the clip when it moves; a single rectangle is a still crop.
+- Color > Adjust (temperature, tint, exposure, contrast, highlights,
+  shadows, whites, blacks, saturation, vibrance) and the HDR colour panel's
+  primary settings -> Lumetri Color; brightness -> Brightness & Contrast.
+- The Transform's shadow -> Drop Shadow (colour, opacity, angle, distance,
+  softness), applied after the other effects.
+- Sharpen, Flip -> Horizontal Flip, Chroma Key -> Ultra Key with its colour.
+- Switched-off effects, empty masks and untouched colour wheels are ignored;
+  unknown colour sliders, masks, Filmora's own effects and AI features are
+  still reported.
+
+Tests: our own fixture with every mapped effect, defensive Pan & Zoom
+parsing, and (when FILMCRAFT_FILMORA_FIXTURES is set) the user's projects
+with a count of the effects that arrived.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ crates/interchange/src/filmora.rs | 488 ++++++++++++++++++++++++++----
+ 1 file changed, 434 insertions(+), 54 deletions(-)
+
+diff --git a/crates/interchange/src/filmora.rs b/crates/interchange/src/filmora.rs
+index 309d3726..2a5bb32b 100644
+--- a/crates/interchange/src/filmora.rs
++++ b/crates/interchange/src/filmora.rs
+@@ -15,10 +15,21 @@
+ //! - titles (type 4, alone in a compound clip, as Filmora wraps them) become graphic clips with a
+ //!   text layer: text, font, size, colour and position;
+ //! - Transform (position, scale, rotation) to Motion; clip volume (dB) and mute; audio fades and
+-//!   transitions (`postTransition` / `preTransition`) with their range.
++//!   transitions (`postTransition` / `preTransition`) with their range;
++//! - Filmora's effects that have a FilmCraft counterpart: Crop / Pan & Zoom (`crop-pan-zoom`, a
++//!   rectangle of the source per keyframe) to Crop with Zoom, keyframed over the clip; the
++//!   Transform's drop shadow to Drop Shadow; Color ▸ Adjust (`AdjustColor`: temperature, tint,
++//!   exposure, contrast, highlights, shadows, whites, blacks, saturation, vibrance) and the HDR
++//!   colour panel's primary settings to Lumetri Color, brightness to Brightness & Contrast;
++//!   Sharpen; Flip to Horizontal Flip; Chroma Key to Ultra Key with its key colour.
+ //!
+-//! What is reported instead: Filmora effects, colour adjustments, masks, pan-and-zoom, keyframed
+-//! speed and the AI features, which have no FilmCraft counterpart or cannot be read reliably.
++//! Filmora stores most of these settings as panel values; the strengths are carried over on the
++//! same scale where Filmora and FilmCraft share one (−100…100 sliders) and approximated where
++//! they do not (exposure, sharpen and shadow distances), so a graded clip looks close, not
++//! identical.
++//!
++//! What is reported instead: Filmora's own effects, filters and LUTs, masks, keyframed speed and
++//! the AI features, which have no FilmCraft counterpart or cannot be read reliably.
+ //!
+ //! Time is in units of 100 ns (`10_000_000` per second); it maps onto ticks rounded to the nearest.
+ 
+@@ -282,6 +293,98 @@ fn set(ti: &mut TrackItem, effect: &str, param: &str, v: ParamValue) {
+     crate::common::set_param(ti, effect, param, Param::new(v));
+ }
+ 
++/// Add effect `id` with its defaults unless the clip has it already.
++fn ensure(ti: &mut TrackItem, id: &str) {
++    if ti.effect(id).is_none()
++        && let Some(d) = filmcraft_project::effect::find_effect(id)
++    {
++        ti.effects.push(d.instance());
++    }
++}
++
++/// A parameter of an effect-list entry, as text (`SettingScript` and other JSON-in-a-string).
++fn text<'v>(e: &'v Value, name: &str) -> Option<&'v str> {
++    e.get("paramList")?.as_array()?.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name))?.get("fxParam")?.get("unValue")?.as_str()
++}
++
++/// Filmora writes `"enable": false` on effects that are switched off in the chain.
++fn enabled(e: &Value) -> bool {
++    e.get("enable").and_then(Value::as_bool) != Some(false)
++}
++
++/// A Filmora colour as stored in `dwValue` (`0xAARRGGBB` in a signed 32-bit integer).
++fn argb(v: f64) -> [f32; 4] {
++    let v = (v as i64) as u32;
++    let c = |s: u32| ((v >> s) & 0xff) as f32 / 255.0;
++    [c(16), c(8), c(0), 1.0]
++}
++
++/// A Filmora key colour (`0x00BBGGRR`, Windows `COLORREF` order).
++fn bgr(v: f64) -> [f32; 4] {
++    let v = (v as i64) as u32;
++    let c = |s: u32| ((v >> s) & 0xff) as f32 / 255.0;
++    [c(0), c(8), c(16), 1.0]
++}
++
++/// One Pan & Zoom keyframe: when (0…1 of the clip) and the source rectangle shown (0…1).
++#[derive(Clone, Copy, Debug, PartialEq)]
++struct PanZoomKey {
++    at: f64,
++    x: f64,
++    y: f64,
++    w: f64,
++    h: f64,
++}
++
++impl PanZoomKey {
++    /// Crop's left, top, right and bottom (percent) that show this rectangle.
++    fn crop(self) -> [f64; 4] {
++        [self.x * 100.0, self.y * 100.0, (1.0 - self.x - self.w) * 100.0, (1.0 - self.y - self.h) * 100.0].map(|v| v.clamp(0.0, 100.0))
++    }
++    fn is_full_frame(self) -> bool {
++        self.crop().iter().all(|v| v.abs() < 1e-3)
++    }
++}
++
++/// Crop / Pan & Zoom's keyframes from its `SettingScript` (`[{Time, X, Y, Width, Height}, …]`).
++fn pan_zoom_keys(script: &str) -> Option<Vec<PanZoomKey>> {
++    let v: Value = serde_json::from_str(script).ok()?;
++    let mut keys: Vec<PanZoomKey> = v
++        .as_array()?
++        .iter()
++        .take(1000)
++        .filter_map(|k| {
++            let g = |n: &str| k.get(n).and_then(Value::as_f64).filter(|v| v.is_finite());
++            let key = PanZoomKey { at: g("Time").unwrap_or(0.0).clamp(0.0, 1.0), x: g("X")?, y: g("Y")?, w: g("Width")?, h: g("Height")? };
++            (key.w > 0.0 && key.h > 0.0 && key.w <= 1.0 + 1e-6 && key.h <= 1.0 + 1e-6).then_some(key)
++        })
++        .collect();
++    keys.sort_by(|a, b| a.at.total_cmp(&b.at));
++    keys.dedup_by(|a, b| (a.at - b.at).abs() < 1e-9);
++    (!keys.is_empty()).then_some(keys)
++}
++
++/// Color ▸ Adjust's sliders (`u_*`, −100…100 unless noted) → (effect, parameter, value).
++fn adjust_color_param(name: &str, v: f64) -> Option<(&'static str, &'static str, f64)> {
++    let clamp = |v: f64| v.clamp(-100.0, 100.0);
++    Some(match name {
++        "u_temperature" => ("lumetri", "temperature", clamp(v)),
++        "u_tint" => ("lumetri", "tint", clamp(v)),
++        // Filmora's ±100 is about ±2 stops; Lumetri's exposure is in stops.
++        "u_exposure" => ("lumetri", "exposure", (v / 50.0).clamp(-5.0, 5.0)),
++        "u_contrast" => ("lumetri", "contrast", clamp(v)),
++        "u_highLight" | "u_highlight" | "u_highlights" => ("lumetri", "highlights", clamp(v)),
++        "u_shadow" | "u_shadows" => ("lumetri", "shadows", clamp(v)),
++        "u_white" | "u_whites" => ("lumetri", "whites", clamp(v)),
++        "u_black" | "u_blacks" => ("lumetri", "blacks", clamp(v)),
++        // Filmora's 0 is unchanged, +100 doubled: Lumetri's 100 % is unchanged.
++        "u_saturation" => ("lumetri", "saturation", (100.0 + v).clamp(0.0, 200.0)),
++        "u_vibrance" => ("lumetri", "vibrance", clamp(v)),
++        "u_brightness" => ("brightness_contrast", "brightness", clamp(v)),
++        _ => return None,
++    })
++}
++
+ impl Imp<'_, '_> {
+     fn skip(&mut self, what: &str) {
+         self.ignored.push(what.to_string());
+@@ -581,48 +684,41 @@ impl Imp<'_, '_> {
+         id
+     }
+ 
+-    /// Transform, volume and the unsupported effects of a clip; returns its audio fades.
++    /// Transform, effects and volume of a clip; returns its audio fades.
+     fn adjust(&mut self, ti: &mut TrackItem, c: &Value, kind: TrackKind, frame: (u32, u32, FrameRate)) -> (Option<Tick>, Option<Tick>) {
+         let (w, h, _) = frame;
+         let mut fades = (None, None);
+         if kind == TrackKind::Video {
+-            for e in effects(c, "Basic") {
++            // Applied last, so the shadow falls from the cropped, keyed and graded picture.
++            let mut shadow = None;
++            for e in effects(c, "Basic").filter(|e| enabled(e)) {
+                 match display(e) {
+                     "transform" => {
+-                        let (sx, sy) = (num(e, "Scale_x"), num(e, "Scale_y"));
+-                        if let (Some(sx), Some(sy)) = (sx, sy)
+-                            && sx.is_finite()
+-                            && sy.is_finite()
+-                        {
+-                            set(ti, "motion", "scale", ParamValue::Float(sy.clamp(0.0, 10_000.0)));
+-                            if (sx - sy).abs() > 1e-3 {
+-                                set(ti, "motion", "uniform_scale", ParamValue::Bool(false));
+-                                set(ti, "motion", "scale_width", ParamValue::Float(sx.clamp(0.0, 10_000.0)));
+-                            }
+-                        }
+-                        if num(e, "Position_x").is_some() || num(e, "Position_y").is_some() {
+-                            let px = num(e, "Position_x").unwrap_or(0.5).clamp(-100.0, 100.0) * w as f64;
+-                            let py = num(e, "Position_y").unwrap_or(0.5).clamp(-100.0, 100.0) * h as f64;
+-                            set(ti, "motion", "position", ParamValue::Vec2(Vec2::new(px, py)));
+-                        }
+-                        if let Some(r) = num(e, "Rotation").filter(|r| r.is_finite()) {
+-                            set(ti, "motion", "rotation", ParamValue::Float(r));
+-                        }
++                        self.transform(ti, e, w, h);
+                         if flag(e, "EnableShadow") == Some(true) {
+-                            self.skip("drop shadows");
+-                        }
+-                    }
+-                    "crop-pan-zoom" => {
+-                        if e.get("paramList").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
+-                            self.skip("crop and pan-and-zoom");
++                            shadow = Some(e);
+                         }
+                     }
++                    "crop-pan-zoom" => self.pan_zoom(ti, e),
+                     "" => {}
+                     other => self.skip(&format!("\"{other}\" effects")),
+                 }
+             }
++            for chain in ["BasicFollow", "Color", "Effect"] {
++                for e in effects(c, chain).filter(|e| enabled(e)) {
++                    self.video_effect(ti, e);
++                }
++            }
++            for e in effects(c, "Mask").filter(|e| enabled(e)) {
++                if mask_count(e) != Some(0) {
++                    self.skip("masks");
++                }
++            }
++            if let Some(e) = shadow {
++                drop_shadow(ti, e, w, h);
++            }
+         } else {
+-            for e in effects(c, "BasicFollow") {
++            for e in effects(c, "BasicFollow").filter(|e| enabled(e)) {
+                 match display(e) {
+                     "volume" => {
+                         if let Some(db) = num(e, "VolumeGain").filter(|d| d.is_finite()) {
+@@ -638,34 +734,177 @@ impl Imp<'_, '_> {
+                             num(e, "FadeOutTime").filter(|s| s.is_finite() && *s > 0.0).map(Tick::from_seconds_f64),
+                         );
+                     }
+-                    "equalizer" | "ChromaKeyV3" if e.get("paramList").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) => {
+-                        let d = display(e).to_string();
+-                        self.skip(&format!("\"{d}\" settings"));
+-                    }
++                    "equalizer" if e.get("paramList").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) => self.skip("equalizer settings"),
+                     _ => {}
+                 }
+             }
+         }
+-        for chain in ["Color", "Effect", "Mask"] {
+-            let names: Vec<String> = effects(c, chain).map(|e| display(e).to_string()).filter(|n| !n.is_empty()).collect();
+-            for n in names {
+-                let what = match chain {
+-                    "Color" => "colour adjustments".to_string(),
+-                    "Mask" => "masks".to_string(),
+-                    _ => format!("\"{n}\" effects"),
+-                };
+-                // An untouched colour panel is in every clip's chain; only real settings count.
+-                if chain == "Color" && !effects(c, "Color").any(|e| e.get("paramList").and_then(Value::as_array).is_some_and(|p| p.len() > 12)) {
+-                    continue;
+-                }
+-                self.skip(&what);
+-            }
+-        }
+         if c.get("audio_cloud_algorithm").is_some() || c.get("video_cloud_algorithm").is_some() || c.get("humanseg_hair").is_some() {
+             self.skip("AI processing (denoise, segmentation, cloud effects)");
+         }
+         fades
+     }
++
++    /// Transform's position, scale and rotation → Motion.
++    fn transform(&mut self, ti: &mut TrackItem, e: &Value, w: u32, h: u32) {
++        let (sx, sy) = (num(e, "Scale_x"), num(e, "Scale_y"));
++        if let (Some(sx), Some(sy)) = (sx, sy)
++            && sx.is_finite()
++            && sy.is_finite()
++        {
++            set(ti, "motion", "scale", ParamValue::Float(sy.clamp(0.0, 10_000.0)));
++            if (sx - sy).abs() > 1e-3 {
++                set(ti, "motion", "uniform_scale", ParamValue::Bool(false));
++                set(ti, "motion", "scale_width", ParamValue::Float(sx.clamp(0.0, 10_000.0)));
++            }
++        }
++        if num(e, "Position_x").is_some() || num(e, "Position_y").is_some() {
++            let px = num(e, "Position_x").unwrap_or(0.5).clamp(-100.0, 100.0) * w as f64;
++            let py = num(e, "Position_y").unwrap_or(0.5).clamp(-100.0, 100.0) * h as f64;
++            set(ti, "motion", "position", ParamValue::Vec2(Vec2::new(px, py)));
++        }
++        if let Some(r) = num(e, "Rotation").filter(|r| r.is_finite()) {
++            set(ti, "motion", "rotation", ParamValue::Float(r));
++        }
++    }
++
++    /// Crop / Pan & Zoom → Crop with Zoom on, keyframed over the clip when it moves.
++    fn pan_zoom(&mut self, ti: &mut TrackItem, e: &Value) {
++        let Some(script) = text(e, "SettingScript") else { return };
++        let Some(keys) = pan_zoom_keys(script) else {
++            self.skip("pan-and-zoom settings that could not be read");
++            return;
++        };
++        let moving = keys.windows(2).any(|k| k[0].crop() != k[1].crop());
++        if !moving && keys[0].is_full_frame() {
++            return;
++        }
++        ensure(ti, "crop");
++        let duration = ti.duration;
++        let Some(crop) = ti.effect_mut("crop") else { return };
++        if let Some(p) = crop.param_mut("zoom") {
++            *p = Param::new(ParamValue::Bool(true));
++        }
++        for (i, id) in ["left", "top", "right", "bottom"].into_iter().enumerate() {
++            let mut p = Param::new(ParamValue::Float(keys[0].crop()[i]));
++            if moving {
++                for k in &keys {
++                    let at = Tick((duration.0 as f64 * k.at).round() as i64);
++                    p.put_keyframe(at, ParamValue::Float(k.crop()[i]));
++                }
++            }
++            crop.params.insert(id.to_string(), p);
++        }
++    }
++
++    /// One effect of the Color, Effect or (on video) BasicFollow chain.
++    fn video_effect(&mut self, ti: &mut TrackItem, e: &Value) {
++        match display(e) {
++            "AdjustColor" => self.adjust_color(ti, e),
++            "HDRColor" => self.hdr_color(ti, e),
++            "ColorWheel" => {
++                let set_up =
++                    e.get("paramList").and_then(Value::as_array).is_some_and(|p| p.iter().any(|p| p.get("name").and_then(Value::as_str) != Some("version")));
++                if set_up {
++                    self.skip("colour wheels");
++                }
++            }
++            "Flip" => ensure(ti, "horizontal_flip"),
++            "Sharpen" => {
++                // Filmora's Sharpen without settings is its default strength.
++                let amount = ["amount", "Amount", "strength", "Strength"].iter().find_map(|n| num(e, n)).unwrap_or(25.0);
++                set(ti, "sharpen", "amount", ParamValue::Float(amount.clamp(0.0, 4000.0)));
++            }
++            "ChromaKey" | "ChromaKeyV2" | "ChromaKeyV3" => {
++                ensure(ti, "ultra_key");
++                if let Some(c) = num(e, "color").or_else(|| num(e, "Color")).filter(|c| c.is_finite()) {
++                    set(ti, "ultra_key", "key_color", ParamValue::Color(bgr(c)));
++                }
++            }
++            // An audio clip's settings that Filmora keeps on the video side of a linked clip.
++            "volume" | "fade" | "clip_volume" | "change_channel" | "ducking" | "equalizer" | "" => {}
++            n if n.starts_with("HumanSegmentation") => self.skip("AI portrait cutouts"),
++            other => self.skip(&format!("\"{other}\" effects")),
++        }
++    }
++
++    /// Color ▸ Adjust → Lumetri Color (and Brightness & Contrast for brightness).
++    fn adjust_color(&mut self, ti: &mut TrackItem, e: &Value) {
++        let params = e.get("paramList").and_then(Value::as_array).into_iter().flatten();
++        for p in params {
++            let Some(name) = p.get("name").and_then(Value::as_str).filter(|n| n.starts_with("u_")) else { continue };
++            let Some(v) = p.get("fxParam").and_then(|f| f.get("unValue")).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() > 1e-9) else {
++                continue;
++            };
++            match adjust_color_param(name, v) {
++                Some((effect, param, value)) => set(ti, effect, param, ParamValue::Float(value)),
++                None => self.skip(&format!("colour settings ({name})")),
++            }
++        }
++    }
++
++    /// The HDR colour panel's primary settings → Lumetri Color; its zones are reported.
++    fn hdr_color(&mut self, ti: &mut TrackItem, e: &Value) {
++        let Some(hdr) = e.get("hdr_color").and_then(Value::as_str).and_then(|s| serde_json::from_str::<Value>(s.trim_end_matches('\0')).ok()) else {
++            return;
++        };
++        let get = |a: &str, b: &str| hdr.get(a).and_then(|v| v.get(b)).and_then(Value::as_f64).filter(|v| v.is_finite());
++        let changed = |v: Option<f64>, neutral: f64| v.filter(|v| (v - neutral).abs() > 1e-6);
++        if let Some(v) = changed(get("primaryColorAdjust", "temperature"), 0.0) {
++            set(ti, "lumetri", "temperature", ParamValue::Float(v.clamp(-100.0, 100.0)));
++        }
++        if let Some(v) = changed(get("primaryColorAdjust", "tint"), 0.0) {
++            set(ti, "lumetri", "tint", ParamValue::Float(v.clamp(-100.0, 100.0)));
++        }
++        if let Some(v) = changed(get("primaryColorAdjust", "contrast"), 1.0) {
++            set(ti, "lumetri", "contrast", ParamValue::Float(((v - 1.0) * 100.0).clamp(-100.0, 100.0)));
++        }
++        if let Some(v) = changed(get("globalColorWheel", "exposure"), 0.0) {
++            set(ti, "lumetri", "exposure", ParamValue::Float(v.clamp(-5.0, 5.0)));
++        }
++        if let Some(v) = changed(get("globalColorWheel", "saturation"), 1.0) {
++            set(ti, "lumetri", "saturation", ParamValue::Float((v * 100.0).clamp(0.0, 200.0)));
++        }
++        let rest = ["hue", "pivot", "midtoneDetail", "blackOffset"].iter().any(|k| changed(get("primaryColorAdjust", k), 0.0).is_some())
++            || ["colorAngle", "colorStrength"].iter().any(|k| changed(get("globalColorWheel", k), 0.0).is_some())
++            || hdr.get("zoneGraph").and_then(Value::as_array).into_iter().flatten().any(|z| {
++                let f = |k: &str| z.get(k).and_then(Value::as_f64);
++                f("exposure").is_some_and(|v| v.abs() > 1e-6)
++                    || f("colorStrength").is_some_and(|v| v.abs() > 1e-6)
++                    || f("saturation").is_some_and(|v| (v - 1.0).abs() > 1e-6)
++            });
++        if rest {
++            self.skip("HDR colour zones, hue and wheels");
++        }
++    }
++}
++
++/// How many masks a `ComplexMask` holds (`None` when it can't be read).
++fn mask_count(e: &Value) -> Option<u64> {
++    let p = e.get("paramList")?.as_array()?.iter().find(|p| p.get("name").and_then(Value::as_str) == Some("IComplexMask"))?;
++    let data = p.get("fxParam")?.get("unValue")?.get("complex_mask")?.get("complexmask_data")?.as_str()?;
++    serde_json::from_str::<Value>(data.trim_end_matches('\0')).ok()?.get("mask_count")?.as_u64()
++}
++
++/// The Transform's shadow → Drop Shadow (distances are Filmora's at 1080 lines).
++fn drop_shadow(ti: &mut TrackItem, e: &Value, w: u32, h: u32) {
++    let px = f64::from(w.min(h).max(1)) / 1080.0;
++    ensure(ti, "drop_shadow");
++    if let Some(c) = num(e, "dwValue").filter(|c| c.is_finite()) {
++        set(ti, "drop_shadow", "color", ParamValue::Color(argb(c)));
++    }
++    if let Some(a) = num(e, "nAlpha").filter(|a| a.is_finite()) {
++        set(ti, "drop_shadow", "opacity", ParamValue::Float(a.clamp(0.0, 100.0)));
++    }
++    if let Some(d) = num(e, "uDirectAngle").filter(|d| d.is_finite()) {
++        set(ti, "drop_shadow", "direction", ParamValue::Float(d.rem_euclid(360.0)));
++    }
++    if let Some(d) = num(e, "nDistance").filter(|d| d.is_finite()) {
++        set(ti, "drop_shadow", "distance", ParamValue::Float((d * px).clamp(0.0, 4000.0)));
++    }
++    if let Some(b) = num(e, "nBlur").filter(|b| b.is_finite()) {
++        set(ti, "drop_shadow", "softness", ParamValue::Float((b * px).clamp(0.0, 1000.0)));
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -739,7 +978,7 @@ mod tests {
+               {{"trackType":1,"trackTag":2,"clipList":[
+                  {{"type":1,"filename":"file://Volumes/LaCie/Club/IMG_1.mov","sourceUuid":"s-1","inPoint":40000000,"outPoint":80000000,"tlBegin":0,"tlEnd":20000000,"speed":{{"speedParam":"{speed2}"}},
+                    "effectChainList":[{{"name":"Basic","effectList":[{{"display":"transform","paramList":[{{"name":"Scale_x","fxParam":{{"paramType":3,"unValue":150.0}}}},{{"name":"Scale_y","fxParam":{{"paramType":3,"unValue":150.0}}}},{{"name":"Position_x","fxParam":{{"paramType":3,"unValue":0.25}}}},{{"name":"Rotation","fxParam":{{"paramType":3,"unValue":10.0}}}}]}}]}},
+-                     {{"name":"Effect","effectList":[{{"display":"Flip","paramList":[]}}]}}]}},
++                     {{"name":"Effect","effectList":[{{"display":"Flip","paramList":[]}},{{"display":"Old Film","paramList":[]}}]}}]}},
+                  {{"type":1,"filename":"file:///Users/emil/Logos/logo.png","sourceUuid":"s-2","inPoint":36000000000,"outPoint":36030000000,"tlBegin":20000000,"tlEnd":50000000}}]}},
+               {{"trackType":1,"trackTag":4,"clipList":[{{"type":7,"timelineId":2,"inPoint":0,"outPoint":30000000,"tlBegin":0,"tlEnd":30000000,"isAudio":0,
+                  "postTransition":{{"display":"Dissolve","tlBegin":25000000,"tlEnd":30000000}}}}]}}]}},
+@@ -853,8 +1092,130 @@ mod tests {
+         for want in ["/Volumes/Mac2/Music/song.mp3", "/Volumes/LaCie/Club/IMG_1.mov", "/Users/emil/Logos/logo.png"] {
+             assert_eq!(paths.iter().filter(|p| *p == want).count(), 1, "{want}: {paths:?}");
+         }
+-        // What could not be carried is reported.
+-        assert!(report.mentions("Flip"), "{report}");
++        // What could not be carried is reported; what has a counterpart is not.
++        assert!(report.mentions("Old Film"), "{report}");
++        assert!(!report.mentions("Flip"), "{report}");
++    }
++
++    /// A clip of our own with the effects Filmora users reach for: Pan & Zoom, Color ▸ Adjust,
++    /// a drop shadow, Flip, Chroma Key, Sharpen, an empty mask and a switched-off effect.
++    fn effects_project() -> Vec<u8> {
++        let p = |name: &str, ty: u32, v: serde_json::Value| serde_json::json!({"name": name, "fxParam": {"paramType": ty, "unValue": v}});
++        let pan_zoom = r#"[{"OriTime": 0, "Time": 0.0, "X": 0.0, "Y": 0.0, "Width": 1.0, "Height": 1.0},
++                          {"OriTime": 84000000, "Time": 1.0, "X": 0.25, "Y": 0.1, "Width": 0.5, "Height": 0.5}]"#;
++        let still_crop = r#"[{"OriTime": 0, "Time": 0.05, "X": 0.1, "Y": 0.2, "Width": 0.6, "Height": 0.6}]"#;
++        let mask = r#"{"mask_count": 0,"used_for_effectmask": false,"masks": [],"params": []}"#.to_string() + "\u{0}";
++        let clip = |file: &str, begin: i64, basic: serde_json::Value, rest: serde_json::Value| {
++            let mut chains = vec![serde_json::json!({"name": "Basic", "effectList": basic})];
++            chains.extend(rest.as_array().cloned().unwrap_or_default());
++            serde_json::json!({"type": 1, "filename": file, "sourceUuid": file, "inPoint": 0, "outPoint": 40_000_000,
++                "tlBegin": begin, "tlEnd": begin + 40_000_000, "effectChainList": chains})
++        };
++        let graded = clip(
++            "file://Volumes/Club/a.mov",
++            0,
++            serde_json::json!([
++                {"display": "transform", "paramList": [p("EnableTransform", 5, 1.into()), p("EnableShadow", 5, 1.into()), p("dwValue", 5, (-16_777_216).into()),
++                    p("nAlpha", 5, 80.into()), p("nDistance", 5, 7.into()), p("nBlur", 5, 9.into()), p("uDirectAngle", 2, 121.0.into())]},
++                {"display": "crop-pan-zoom", "paramList": [p("SettingScript", 6, pan_zoom.into())]},
++                {"display": "InnerShadow", "enable": false}
++            ]),
++            serde_json::json!([
++                {"name": "BasicFollow", "effectList": [{"display": "ChromaKeyV3", "paramList": [p("color", 5, 0x00ff00.into())]}]},
++                {"name": "Color", "effectList": [
++                    {"display": "AdjustColor", "paramList": [p("bEnableColor", 5, 1.into()), p("u_temperature", 3, 20.0.into()), p("u_highLight", 3, (-66.0).into()),
++                        p("u_vibrance", 3, (-14.0).into()), p("u_saturation", 3, 100.0.into()), p("u_brightness", 3, (-20.0).into()),
++                        p("u_contrast", 3, 8.0.into()), p("u_exposure", 3, 50.0.into()), p("u_hue", 3, 12.0.into()), p("u_tint", 3, 0.0.into())]},
++                    {"display": "Sharpen"},
++                    {"display": "ColorWheel", "paramList": [p("version", 5, 1.into())]}
++                ]},
++                {"name": "Effect", "effectList": [{"display": "Flip", "paramList": [p("alpha", 5, 100.into())]}]},
++                {"name": "Mask", "effectList": [{"display": "ComplexMask", "paramList": [p("IComplexMask", 12, serde_json::json!({"complex_mask": {"complexmask_data": mask}}))]}]}
++            ]),
++        );
++        let still = clip(
++            "file:///Users/emil/logo.png",
++            40_000_000,
++            serde_json::json!([{"display": "crop-pan-zoom", "paramList": [p("SettingScript", 6, still_crop.into())]}]),
++            serde_json::json!([{"name": "Effect", "effectList": [{"display": "HumanSegmentationHairEffect"}]}]),
++        );
++        let t = serde_json::json!({"currentTimelineId": 1, "timelineInfos": [{"timelineId": 1, "frameRate": {"num": 25, "den": 1},
++            "resolutionWidth": 1080, "resolutionHeight": 1920, "trackInfos": [{"trackType": 1, "clipList": [graded, still]}]}]});
++        zip(&[("ProjectFolder/project_info.json", INFO), ("ProjectFolder/Medias/AA-BB/timeline.wesproj", &t.to_string())])
++    }
++
++    #[test]
++    fn imports_pan_and_zoom_as_a_keyframed_zoomed_crop() {
++        let (imported, _report) = crate::import(&effects_project(), Format::Filmora, None).unwrap();
++        let seq = imported.project.sequence(imported.sequences[0]).unwrap();
++        let (clip, still) = (&seq.video_tracks[0].items[0], &seq.video_tracks[0].items[1]);
++        let crop = clip.effect("crop").unwrap();
++        assert_eq!(crop.params["zoom"].value, ParamValue::Bool(true));
++        // From the whole frame at the start to the middle half at the end.
++        let keys = |id: &str| crop.params[id].keyframes.iter().map(|k| (k.time, k.value.as_f64().unwrap())).collect::<Vec<_>>();
++        let end = clip.duration;
++        let close = |a: &[(Tick, f64)], b: &[(Tick, f64)]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0 && (x.1 - y.1).abs() < 1e-9);
++        assert!(close(&keys("left"), &[(Tick::ZERO, 0.0), (end, 25.0)]), "{:?}", keys("left"));
++        assert!(close(&keys("top"), &[(Tick::ZERO, 0.0), (end, 10.0)]), "{:?}", keys("top"));
++        assert!(close(&keys("right"), &[(Tick::ZERO, 0.0), (end, 25.0)]), "{:?}", keys("right"));
++        assert!(close(&keys("bottom"), &[(Tick::ZERO, 0.0), (end, 40.0)]), "{:?}", keys("bottom"));
++        // A single rectangle is a still crop.
++        let crop = still.effect("crop").unwrap();
++        assert!(crop.params.values().all(|p| p.keyframes.is_empty()));
++        let v = |id: &str| crop.params[id].value.as_f64().unwrap();
++        for (id, want) in [("left", 10.0), ("top", 20.0), ("right", 30.0), ("bottom", 20.0)] {
++            assert!((v(id) - want).abs() < 1e-9, "{id}: {}", v(id));
++        }
++    }
++
++    #[test]
++    fn imports_colour_shadow_key_sharpen_and_flip() {
++        let (imported, report) = crate::import(&effects_project(), Format::Filmora, None).unwrap();
++        let seq = imported.project.sequence(imported.sequences[0]).unwrap();
++        let clip = &seq.video_tracks[0].items[0];
++        let f = |effect: &str, id: &str| clip.effect(effect).unwrap().params[id].value.as_f64().unwrap();
++        // Color ▸ Adjust → Lumetri, brightness → Brightness & Contrast.
++        assert_eq!(f("lumetri", "temperature"), 20.0);
++        assert_eq!(f("lumetri", "highlights"), -66.0);
++        assert_eq!(f("lumetri", "vibrance"), -14.0);
++        assert_eq!(f("lumetri", "saturation"), 200.0);
++        assert_eq!(f("lumetri", "contrast"), 8.0);
++        assert_eq!(f("lumetri", "exposure"), 1.0);
++        assert_eq!(f("lumetri", "tint"), 0.0);
++        assert_eq!(f("brightness_contrast", "brightness"), -20.0);
++        // The Transform's shadow, black at 80 %, last in the chain.
++        assert_eq!(clip.effects.iter().rev().find(|e| !e.def().is_some_and(|d| d.intrinsic)).unwrap().effect, "drop_shadow");
++        assert_eq!(clip.effect("drop_shadow").unwrap().params["color"].value, ParamValue::Color([0.0, 0.0, 0.0, 1.0]));
++        assert_eq!(f("drop_shadow", "opacity"), 80.0);
++        assert_eq!(f("drop_shadow", "direction"), 121.0);
++        assert_eq!(f("drop_shadow", "distance"), 7.0);
++        assert_eq!(f("drop_shadow", "softness"), 9.0);
++        // Chroma Key's colour, Sharpen, Flip.
++        assert_eq!(clip.effect("ultra_key").unwrap().params["key_color"].value, ParamValue::Color([0.0, 1.0, 0.0, 1.0]));
++        assert_eq!(f("sharpen", "amount"), 25.0);
++        assert!(clip.effect("horizontal_flip").is_some());
++        // Not carried: the hue slider and the AI cutout. Not mentioned: what maps, the empty mask,
++        // the untouched colour wheels and the switched-off inner shadow.
++        assert!(report.mentions("u_hue"), "{report}");
++        assert!(report.mentions("AI portrait"), "{report}");
++        for quiet in ["mask", "wheel", "InnerShadow", "Flip", "Sharpen", "Chroma", "shadow", "pan-and-zoom"] {
++            assert!(!report.mentions(quiet), "{quiet}: {report}");
++        }
++    }
++
++    #[test]
++    fn pan_and_zoom_scripts_are_read_defensively() {
++        assert_eq!(pan_zoom_keys("not json"), None);
++        assert_eq!(pan_zoom_keys("[]"), None);
++        assert_eq!(pan_zoom_keys(r#"[{"Time": 0.5, "X": 0, "Y": 0, "Width": 0, "Height": 1}]"#), None);
++        let keys =
++            pan_zoom_keys(r#"[{"Time": 2, "X": 0, "Y": 0, "Width": 1, "Height": 1}, {"Time": -1, "X": 0.5, "Y": 0.5, "Width": 0.5, "Height": 0.5}]"#).unwrap();
++        assert_eq!(keys.iter().map(|k| k.at).collect::<Vec<_>>(), vec![0.0, 1.0]);
++        assert!(keys[1].is_full_frame());
++        assert_eq!(keys[0].crop(), [50.0, 50.0, 0.0, 0.0]);
++        assert_eq!(argb(-16_777_216.0), [0.0, 0.0, 0.0, 1.0]);
++        assert_eq!(argb(f64::from(0x00ff_0000u32)), [1.0, 0.0, 0.0, 1.0]);
++        assert_eq!(bgr(f64::from(0x0000_00ffu32)), [1.0, 0.0, 0.0, 1.0]);
+     }
+ 
+     #[test]
+@@ -886,7 +1247,26 @@ mod tests {
+             let (imported, report) = crate::import(&bytes, Format::Filmora, None).unwrap();
+             let seq = imported.project.sequence(imported.sequences[0]).unwrap();
+             let clips: usize = seq.all_tracks().map(|t| t.items.len()).sum();
+-            eprintln!("{}: {} video / {} audio tracks, {clips} clips\n{report}", path.display(), seq.video_tracks.len(), seq.audio_tracks.len());
++            let mut fx = std::collections::BTreeMap::<String, usize>::new();
++            for e in imported
++                .project
++                .items
++                .values()
++                .filter_map(|i| imported.project.sequence(i.id))
++                .flat_map(|s| s.all_tracks())
++                .flat_map(|t| &t.items)
++                .flat_map(|c| &c.effects)
++            {
++                if !e.def().is_some_and(|d| d.intrinsic) && !graphic::is_layer(e) {
++                    *fx.entry(e.effect.clone()).or_default() += 1;
++                }
++            }
++            eprintln!(
++                "{}: {} video / {} audio tracks, {clips} clips, effects {fx:?}\n{report}",
++                path.display(),
++                seq.video_tracks.len(),
++                seq.audio_tracks.len()
++            );
+             seq.check().unwrap();
+             n += 1;
+         }
+-- 
+2.43.0
+
+
+From 7f9246db46e5dc0a244055fab43d72ae9f00762d Mon Sep 17 00:00:00 2001
+From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 16:07:06 +0000
+Subject: [PATCH 4/4] Filmora Edition look: the Mint theme and the Filmora
+ Style workspace
+
+A modification of FilmCraft for its Filmora Edition, so the window feels
+like the editor its users come from:
+
+- Mint (View > Appearance, Settings > Appearance > Dark Theme): cool
+  blue-grey panels and raised surfaces, a mint highlight for the active tab,
+  values and timecodes, a red playhead, rounded frames and thin gaps. The
+  colours were measured from the user's own screenshot of Filmora 16; no
+  Filmora asset is used.
+- Filmora Style (Window > Workspaces): media, titles, effects and libraries
+  as tabs on the left, Properties / Effect Controls / Lumetri in the middle,
+  the player on the right and the timeline across the bottom.
+- On the first launch (no preferences yet) the app picks Mint, its
+  highlight and Filmora Style; both can be changed like any other choice.
+- German labels for both.
+
+Tests: Mint keeps its own colours under its highlight and round-trips
+through the preferences; the workspace shows media, properties, player and
+timeline; the full application draws it (with an opt-in GPU snapshot,
+FILMCRAFT_FILMORA_SNAPSHOT_DIR).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ apps/filmcraft/src/main.rs                 | 15 +++++
+ crates/engine/src/settings/schema.rs       |  4 +-
+ crates/ui-egui/src/dock.rs                 | 16 ++++-
+ crates/ui-egui/src/i18n/de.tsv             |  2 +
+ crates/ui-egui/src/menus.rs                |  2 +
+ crates/ui-egui/src/theme.rs                | 77 ++++++++++++++++++++++
+ crates/ui-egui/tests/it/filmora_look_ui.rs | 72 ++++++++++++++++++++
+ crates/ui-egui/tests/it/main.rs            |  1 +
+ 8 files changed, 185 insertions(+), 4 deletions(-)
+ create mode 100644 crates/ui-egui/tests/it/filmora_look_ui.rs
+
+diff --git a/apps/filmcraft/src/main.rs b/apps/filmcraft/src/main.rs
+index 0914da21..921d15e9 100644
+--- a/apps/filmcraft/src/main.rs
++++ b/apps/filmcraft/src/main.rs
+@@ -229,6 +229,9 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
+                 }
+             }),
+         );
++        // Filmora Edition (a modification of FilmCraft): the first launch, before any preferences
++        // exist, looks and is laid out like Filmora (Mint theme, Filmora Style workspace).
++        let first_launch = data_dir.clone().or_else(default_data_dir).is_some_and(|d| !d.join("preferences.json").exists());
+         let mut session = Session::default();
+         if let Some(dir) = data_dir.clone().or_else(default_data_dir) {
+             let mut cfg = AutosaveConfig::new(dir);
+@@ -237,6 +240,15 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
+                 log::warn!("auto-save and crash recovery unavailable: {e}");
+             }
+         }
++        if first_launch {
++            let mut prefs = session.prefs.clone();
++            prefs.appearance.select_theme("mint");
++            prefs.appearance.highlight_color = filmcraft_ui_egui::theme::MINT_HIGHLIGHT.into();
++            prefs.appearance.sync_color_theme();
++            if let Err(e) = session.set_prefs(prefs) {
++                log::warn!("could not save the first-launch appearance: {e}");
++            }
++        }
+         // voice-over recording reads the microphone through cpal
+         session.voiceover.input = Some(Box::new(audio_in::CpalIn::new(&session.prefs.audio_hardware.device_class)));
+         let (project, media) = args::project_and_media(&files);
+@@ -272,6 +284,9 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
+             }
+         }
+         let mut app = FilmcraftApp::new(session);
++        if first_launch {
++            app.set_workspace("Filmora Style");
++        }
+         app.set_startup_update_check(true);
+         app.graphics_notice = notice;
+         if recover == Some(false) {
+diff --git a/crates/engine/src/settings/schema.rs b/crates/engine/src/settings/schema.rs
+index 09f0fc53..06cf1cad 100644
+--- a/crates/engine/src/settings/schema.rs
++++ b/crates/engine/src/settings/schema.rs
+@@ -117,7 +117,7 @@ const BIN_OPEN: &[(&str, &str)] = &[("openInPlace", "Open in place"), ("openNewT
+ 
+ const PROJECT_OPEN: &[(&str, &str)] = &[("openNewTab", "Open new tab"), ("openNewWindow", "Open in new window")];
+ 
+-const THEMES: &[(&str, &str)] = &[("darkest", "Darkest"), ("dark", "Dark"), ("light", "Light")];
++const THEMES: &[(&str, &str)] = &[("darkest", "Darkest"), ("dark", "Dark"), ("light", "Light"), ("mint", "Mint")];
+ 
+ pub const APPEARANCE_MODES: &[(&str, &str)] = &[("auto", "Sync with system"), ("dark", "Dark"), ("light", "Light")];
+ 
+@@ -133,7 +133,7 @@ pub const UI_SCALES: &[(&str, &str)] = &[
+     ("300", "300%"),
+ ];
+ 
+-pub const DARK_THEMES: &[(&str, &str)] = &[("darkest", "Darkest"), ("dark", "Dark")];
++pub const DARK_THEMES: &[(&str, &str)] = &[("darkest", "Darkest"), ("dark", "Dark"), ("mint", "Mint")];
+ 
+ pub const LIGHT_THEMES: &[(&str, &str)] = &[("light", "Light")];
+ 
+diff --git a/crates/ui-egui/src/dock.rs b/crates/ui-egui/src/dock.rs
+index c7b473c7..19339154 100644
+--- a/crates/ui-egui/src/dock.rs
++++ b/crates/ui-egui/src/dock.rs
+@@ -145,8 +145,8 @@ fn vsplit(size: SplitSize, a: Node<PanelKind>, b: Node<PanelKind>) -> Node<Panel
+     Node::Split { axis: SplitAxis::Vertical, size, first: Box::new(a), second: Box::new(b) }
+ }
+ 
+-pub const WORKSPACES: [&str; 10] =
+-    ["Editing", "Assembly", "Color", "Effects", "Audio", "Captions and Graphics", "Vertical", "Learning", "Review", "All Panels"];
++pub const WORKSPACES: [&str; 11] =
++    ["Editing", "Assembly", "Color", "Effects", "Audio", "Captions and Graphics", "Vertical", "Filmora Style", "Learning", "Review", "All Panels"];
+ 
+ /// The user's workspaces file, beside `preferences.json` in the data directory.
+ pub const WORKSPACES_FILE: &str = "workspaces.json";
+@@ -493,6 +493,18 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
+             ),
+             tabs(&[Program], 0),
+         ),
++        // Filmora Style (the Filmora Edition's layout; a modification): media, effects and titles
++        // as tabs on the left, the clip's properties in the middle, the player on the right and the
++        // timeline across the bottom, as Filmora arranges its window.
++        "Filmora Style" => vsplit(
++            Ratio(0.57),
++            hsplit(
++                Ratio(0.46),
++                tabs(&[Project, MediaBrowser, EssentialGraphics, Effects, Libraries], 0),
++                hsplit(Ratio(0.45), tabs(&[Properties, EffectControls, LumetriColor], 0), tabs(&[Program, Source], 0)),
++            ),
++            bottom_editing(),
++        ),
+         "All Panels" => vsplit(
+             Ratio(0.5),
+             hsplit(
+diff --git a/crates/ui-egui/src/i18n/de.tsv b/crates/ui-egui/src/i18n/de.tsv
+index a495cf9c..300995aa 100644
+--- a/crates/ui-egui/src/i18n/de.tsv
++++ b/crates/ui-egui/src/i18n/de.tsv
+@@ -3683,3 +3683,5 @@
+ 	Previous	Zurück
+ 	Next	Weiter
+ 	Enter a valid HH:MM:SS:FF timecode	Gültigen Timecode als HH:MM:SS:FF eingeben
++	Filmora Style	Filmora-Stil
++	Mint	Mint
+diff --git a/crates/ui-egui/src/menus.rs b/crates/ui-egui/src/menus.rs
+index 9e10031e..6e21493d 100644
+--- a/crates/ui-egui/src/menus.rs
++++ b/crates/ui-egui/src/menus.rs
+@@ -116,6 +116,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
+     uic!("view.theme.dark", "Darkest", ["View", "Appearance"], None),
+     uic!("view.theme.medium", "Dark", ["View", "Appearance"], None),
+     uic!("view.theme.light", "Light", ["View", "Appearance"], None),
++    uic!("view.theme.mint", "Mint", ["View", "Appearance"], None),
+     uic!("view.appearanceMode.next", "Next Appearance Mode", ["View", "Appearance"], None),
+     uic!("window.workspace.editing", "Editing", ["Window", "Workspaces"], Some("Alt+Shift+1")),
+     uic!("window.workspace.assembly", "Assembly", ["Window", "Workspaces"], Some("Alt+Shift+2")),
+@@ -125,6 +126,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
+     uic!("window.workspace.captionsandgraphics", "Captions and Graphics", ["Window", "Workspaces"], Some("Alt+Shift+6")),
+     uic!("window.workspace.allpanels", "All Panels", ["Window", "Workspaces"], None),
+     uic!("window.workspace.vertical", "Vertical", ["Window", "Workspaces"], None),
++    uic!("window.workspace.filmorastyle", "Filmora Style", ["Window", "Workspaces"], None),
+     uic!("window.workspace.reset", "Reset to Saved Layout", ["Window", "Workspaces"], Some("Alt+Shift+0")),
+     uic!("window.workspace.saveChanges", "Save Changes to this Workspace", ["Window", "Workspaces"], None),
+     uic!("window.workspace.saveAs", "Save as New Workspace…", ["Window", "Workspaces"], None),
+diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
+index 13a9cc61..36fd0614 100644
+--- a/crates/ui-egui/src/theme.rs
++++ b/crates/ui-egui/src/theme.rs
+@@ -16,6 +16,9 @@ pub enum ThemeKind {
+     /// Slightly lighter grey panels (Premiere's brightness slider mid position).
+     Medium,
+     Light,
++    /// Cool blue-grey panels with a mint accent and a red playhead (the Filmora Edition's look;
++    /// a modification, not part of the original FilmCraft).
++    Mint,
+ }
+ 
+ impl ThemeKind {
+@@ -25,12 +28,14 @@ impl ThemeKind {
+             ThemeKind::Dark => "darkest",
+             ThemeKind::Medium => "dark",
+             ThemeKind::Light => "light",
++            ThemeKind::Mint => "mint",
+         }
+     }
+     pub fn from_pref(s: &str) -> ThemeKind {
+         match s {
+             "dark" => ThemeKind::Medium,
+             "light" => ThemeKind::Light,
++            "mint" => ThemeKind::Mint,
+             _ => ThemeKind::Dark,
+         }
+     }
+@@ -39,6 +44,7 @@ impl ThemeKind {
+             "dark" | "darkest" => Some(ThemeKind::Dark),
+             "medium" | "grey" | "gray" => Some(ThemeKind::Medium),
+             "light" => Some(ThemeKind::Light),
++            "mint" | "filmora" => Some(ThemeKind::Mint),
+             _ => None,
+         }
+     }
+@@ -330,6 +336,70 @@ impl Tokens {
+                 tl_ruler_text: Color32::from_rgb(80, 80, 80),
+                 ..dark
+             },
++            // Measured from the user's own screenshot of Filmora 16: panels #181c1f, raised
++            // surfaces #202427, controls #373f45, mint #50e0c0 for the active tab and values, a
++            // red playhead, rounded frames and thin gaps.
++            ThemeKind::Mint => Tokens {
++                app_bg: Color32::from_rgb(0x0b, 0x0d, 0x0f),
++                header_bg: Color32::from_rgb(0x20, 0x24, 0x27),
++                panel_bg: Color32::from_rgb(0x18, 0x1c, 0x1f),
++                tab_bg: Color32::from_rgb(0x1c, 0x20, 0x23),
++                tab_text: Color32::from_rgb(0xa3, 0xab, 0xb1),
++                tab_text_active: MINT_TEXT,
++                focus: MINT_TEXT,
++                accent: MINT,
++                accent_hover: Color32::from_rgb(0x34, 0xc8, 0xa7),
++                text: Color32::from_rgb(0xe3, 0xe7, 0xea),
++                text_dim: Color32::from_rgb(0xa3, 0xab, 0xb1),
++                text_faint: Color32::from_rgb(0x69, 0x72, 0x78),
++                icon: Color32::from_rgb(0xa3, 0xab, 0xb1),
++                icon_active: Color32::from_rgb(0xe3, 0xe7, 0xea),
++                hover: Color32::from_rgb(0x2a, 0x30, 0x35),
++                pressed: Color32::from_rgb(0x37, 0x3f, 0x45),
++                field_bg: Color32::from_rgb(0x12, 0x15, 0x18),
++                field_border: Color32::from_rgb(0x31, 0x36, 0x3b),
++                separator: Color32::from_rgb(0x2a, 0x2f, 0x33),
++                row_alt: Color32::from_rgb(0x1c, 0x20, 0x23),
++                row_selected: Color32::from_rgb(0x23, 0x3a, 0x35),
++                hot_text: MINT_TEXT,
++                pill_active_bg: Color32::from_rgb(0x37, 0x3f, 0x45),
++                clip_bar_bg: Color32::from_rgb(0x23, 0x3a, 0x35),
++                control_surface: Color32::from_rgb(0x20, 0x24, 0x27),
++                control_well: Color32::from_rgb(0x10, 0x13, 0x15),
++                control_border: Color32::from_rgb(0x46, 0x4e, 0x54),
++                control_handle_bg: Color32::from_rgb(0x2a, 0x30, 0x35),
++                plot_bg: Color32::from_rgb(0x15, 0x19, 0x1c),
++                plot_grid: Color32::from_rgb(0x26, 0x2b, 0x2f),
++                plot_axis: Color32::from_rgb(0x3c, 0x44, 0x4a),
++                meter_readout_bg: Color32::from_rgb(0x12, 0x15, 0x18),
++                meter_clip_off: Color32::from_rgb(0x2a, 0x2f, 0x33),
++                keyframe_plot_bg: Color32::from_rgb(0x15, 0x19, 0x1c),
++                keyframe_plot_grid: Color32::from_rgb(0x26, 0x2b, 0x2f),
++                keyframe_plot_axis: Color32::from_rgb(0x31, 0x36, 0x3b),
++                switch_fill: MINT,
++                button_hover: Color32::from_rgb(0x2a, 0x30, 0x35),
++                button_border: Color32::from_rgb(0x3c, 0x44, 0x4a),
++                caption_track_bg: Color32::from_rgb(0x1f, 0x26, 0x2c),
++                scroll_thumb: Color32::from_rgb(0x31, 0x36, 0x3b),
++                scroll_thumb_hover: Color32::from_rgb(0x4a, 0x52, 0x58),
++                vertical_scroll_thumb: Color32::from_rgb(0x3a, 0x41, 0x47),
++                disabled_clip_bg: Color32::from_rgb(0x2a, 0x2f, 0x33),
++                tl_bg: Color32::from_rgb(0x18, 0x1c, 0x1f),
++                tl_track_bg: Color32::from_rgb(0x18, 0x1c, 0x1f),
++                tl_track_bg_alt: Color32::from_rgb(0x1b, 0x1f, 0x22),
++                tl_header_bg: Color32::from_rgb(0x20, 0x24, 0x27),
++                tl_ruler_bg: Color32::from_rgb(0x18, 0x1c, 0x1f),
++                tl_ruler_tick: Color32::from_rgb(0x5d, 0x66, 0x6c),
++                tl_ruler_text: Color32::from_rgb(0x8c, 0x95, 0x9b),
++                playhead: Color32::from_rgb(0xf8, 0x60, 0x60),
++                track_target: Color32::from_rgb(0x1d, 0x8f, 0x76),
++                in_out_shade: Color32::from_rgb(0x26, 0x3a, 0x36),
++                monitor_bg: Color32::from_rgb(0x18, 0x1c, 0x1f),
++                timecode: MINT_TEXT,
++                radius: 6.0,
++                gap: 2.0,
++                ..dark
++            },
+         }
+     }
+ 
+@@ -513,6 +583,13 @@ pub fn apply_visuals(ctx: &egui::Context, t: &Tokens) {
+ 
+ /// How long egui's fades and slides take (menus, collapsing sections, tooltips); 0 when
+ /// Settings ▸ Appearance ▸ "Animate zoom, scrolling and menus" is off (#2325).
++/// The Mint theme's highlight: filled controls and selections (white text stays readable on it).
++pub const MINT: Color32 = Color32::from_rgb(0x24, 0xb8, 0x97);
++/// The Mint theme's lighter mint for text on dark surfaces: the active tab, values, timecodes.
++pub const MINT_TEXT: Color32 = Color32::from_rgb(0x50, 0xe0, 0xc0);
++/// [`MINT`] as a Settings ▸ Appearance ▸ Highlight Color value.
++pub const MINT_HIGHLIGHT: &str = "#24b897";
++
+ pub const ANIMATION_TIME: f32 = 0.12;
+ 
+ #[cfg(test)]
+diff --git a/crates/ui-egui/tests/it/filmora_look_ui.rs b/crates/ui-egui/tests/it/filmora_look_ui.rs
+new file mode 100644
+index 00000000..f922f986
+--- /dev/null
++++ b/crates/ui-egui/tests/it/filmora_look_ui.rs
+@@ -0,0 +1,72 @@
++//! The Filmora Edition's look (a modification of FilmCraft): the Mint theme and the Filmora Style
++//! workspace in the full application.
++
++use egui::vec2;
++use egui_kittest::Harness;
++use filmcraft_engine::Session;
++use filmcraft_ui_egui::FilmcraftApp;
++use filmcraft_ui_egui::dock::{self, LayoutExt, PanelKind};
++use filmcraft_ui_egui::theme::{self, ThemeKind, Tokens};
++use serde_json::json;
++
++fn frames(h: &mut Harness<'_, FilmcraftApp>, count: usize) {
++    for _ in 0..count {
++        h.step();
++        assert!(h.state().ui_error.is_none(), "the app caught a UI panic: {:?}", h.state().ui_error);
++    }
++}
++
++#[test]
++fn mint_keeps_its_own_colours_with_its_highlight() {
++    let highlight = filmcraft_engine::settings::parse_hex(theme::MINT_HIGHLIGHT);
++    let t = Tokens::for_kind(ThemeKind::Mint).with_appearance(highlight, false);
++    assert_eq!(t, Tokens::for_kind(ThemeKind::Mint));
++    assert_eq!((t.accent, t.tab_text_active, t.playhead), (theme::MINT, theme::MINT_TEXT, egui::Color32::from_rgb(0xf8, 0x60, 0x60)));
++    assert_eq!(ThemeKind::from_pref(ThemeKind::Mint.pref_name()), ThemeKind::Mint);
++    assert_eq!(ThemeKind::from_name("filmora"), Some(ThemeKind::Mint));
++    assert!(filmcraft_engine::settings::DARK_THEMES.iter().any(|(v, _)| *v == "mint"));
++}
++
++#[test]
++fn filmora_style_lays_out_media_properties_player_and_timeline() {
++    let layout = dock::workspace("Filmora Style");
++    for p in [PanelKind::Project, PanelKind::Properties, PanelKind::Program, PanelKind::Timeline, PanelKind::Tools] {
++        assert!(layout.is_visible(p), "{p:?} is not shown");
++    }
++    for p in [PanelKind::Effects, PanelKind::EssentialGraphics, PanelKind::LumetriColor, PanelKind::Source] {
++        assert!(layout.is_docked(p), "{p:?} is not docked");
++    }
++    assert!(dock::is_builtin("Filmora Style"));
++    assert_eq!(dock::find(&dock::WorkspacePrefs::default(), "filmorastyle").as_deref(), Some("Filmora Style"));
++}
++
++#[test]
++fn the_filmora_look_draws_in_the_full_application() {
++    let mut session = Session::default();
++    session.execute("file.openDemoProject", json!({})).unwrap();
++    session.execute("prefs.set", json!({"key": "appearance.highlightColor", "value": theme::MINT_HIGHLIGHT})).unwrap();
++    let app = FilmcraftApp::new(session);
++    // Opt in to a GPU snapshot (FILMCRAFT_FILMORA_SNAPSHOT_DIR) while the ordinary test stays headless.
++    let directory = std::env::var_os("FILMCRAFT_FILMORA_SNAPSHOT_DIR").map(std::path::PathBuf::from);
++    let mut builder = Harness::builder().with_size(vec2(1600.0, 900.0)).with_max_steps(10_000);
++    if directory.is_some() {
++        builder = builder.wgpu();
++    }
++    let mut h = builder.build_eframe(move |_| app);
++    frames(&mut h, 3);
++    let ctx = h.ctx.clone();
++    h.state_mut().set_workspace("Filmora Style");
++    filmcraft_ui_egui::menus::invoke(h.state_mut(), &ctx, "view.theme.mint", json!({})).unwrap();
++    frames(&mut h, 4);
++    assert_eq!(h.state().ui.workspace, "Filmora Style");
++    assert_eq!(h.state().tokens.kind, ThemeKind::Mint);
++    assert_eq!(h.state().tokens.accent, theme::MINT);
++    assert_eq!(h.state().session.prefs.appearance.dark_theme, "mint");
++    for panel in ["panel.Project", "panel.Properties", "panel.Program", "panel.Timeline"] {
++        assert!(h.state().auto.find(panel).is_some(), "{panel} is not drawn");
++    }
++    if let Some(dir) = directory {
++        std::fs::create_dir_all(&dir).unwrap();
++        h.render().unwrap().save(dir.join("filmcraft-filmora-edition.png")).unwrap();
++    }
++}
+diff --git a/crates/ui-egui/tests/it/main.rs b/crates/ui-egui/tests/it/main.rs
+index cc580e7c..672dcd78 100644
+--- a/crates/ui-egui/tests/it/main.rs
++++ b/crates/ui-egui/tests/it/main.rs
+@@ -23,6 +23,7 @@ mod escape_drag_ui;
+ mod essential_sound_ui;
+ mod export_menu_ui;
+ mod export_ui;
++mod filmora_look_ui;
+ mod frame_export_ui;
+ mod graphics_handles_ui;
+ mod graphics_notice_ui;
 -- 
 2.43.0
 

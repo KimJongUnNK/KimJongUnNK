@@ -7,7 +7,7 @@
 |---|---|---|
 | **WordCraft – German Version** (modifiziert, wie Word) | `WordCraft-Deutsch-macOS.zip` | `WordCraft-Deutsch-Windows-x64.zip` |
 | **DeckCraft – German Version** (modifiziert, wie PowerPoint) | `DeckCraft-Deutsch-macOS.zip` | `DeckCraft-Deutsch-Windows-x64.zip` |
-| **FilmCraft – Filmora Edition** (modifiziert, wie Premiere, öffnet Filmora-Projekte) | `FilmCraft-Deutsch-macOS.zip` | `FilmCraft-Deutsch-Windows-x64.zip` |
+| **FilmCraft – Filmora Edition** (modifiziert, sieht aus wie Filmora, öffnet Filmora-Projekte mit Effekten) | `FilmCraft-Deutsch-macOS.zip` | `FilmCraft-Deutsch-Windows-x64.zip` |
 
 ## Mac
 
@@ -23,7 +23,7 @@
 1. ZIP entpacken
 2. `.exe` starten → bei Warnung: *Weitere Informationen → Trotzdem ausführen*
 
-**FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Open* öffnen oder ins Fenster ziehen. Die Videos müssen am gleichen Ort liegen wie in Filmora.
+**FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Open* öffnen oder ins Fenster ziehen. Farbe, Pan & Zoom, Schatten, Spiegeln, Chroma Key und Schärfen kommen mit. Die Videos müssen am gleichen Ort liegen wie in Filmora. Beim ersten Start: Filmora-Optik (*Mint*, Arbeitsbereich *Filmora Style*).
 
 Die deutschen Wörterbücher sind dabei. Neue Dokumente sind automatisch Deutsch, wenn dein System auf Deutsch steht.
 
