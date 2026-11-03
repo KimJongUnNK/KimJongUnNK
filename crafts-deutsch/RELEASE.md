@@ -25,7 +25,7 @@ Rechtschreibprüfung auf **Deutsch** (Deutschland, Österreich, Schweiz) statt U
 1. ZIP entpacken
 2. `wordcraft.exe` starten → bei Warnung: *Weitere Informationen → Trotzdem ausführen*
 
-**FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Import* öffnen. Die Videos müssen am gleichen Ort liegen wie in Filmora.
+**FilmCraft:** Filmora-Projekt (`.wfp`) über *File › Open* öffnen oder ins Fenster ziehen. Die Videos müssen am gleichen Ort liegen wie in Filmora.
 
 Die Wörterbücher sind dabei. Neue Dokumente sind automatisch in der Sprache deines Systems.
 

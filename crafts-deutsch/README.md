@@ -38,7 +38,7 @@ DeckCraft genauso (`DeckCraft.app`).
 
 ## FilmCraft – Filmora Edition: Filmora-Projekte öffnen
 
-`FilmCraft.app` installieren wie oben, dann **File › Import** → deine `.wfp` wählen.
+`FilmCraft.app` installieren wie oben, dann **File › Open** → deine `.wfp` wählen (oder die `.wfp` ins FilmCraft-Fenster ziehen). Sie geht als eigenes Projekt auf; *Speichern* legt ein `.fcproj` an, die `.wfp` bleibt unverändert.
 
 - Kommt mit: Clips, Schnitte, Spuren, Speed, Bilder, Titel (als editierbarer Text), Position/Größe/Drehung, Lautstärke, Fades, Übergänge
 - Kommt nicht mit (wird beim Import aufgelistet): Filmora-Effekte, Farbkorrektur, Masken, Pan & Zoom, KI-Funktionen
