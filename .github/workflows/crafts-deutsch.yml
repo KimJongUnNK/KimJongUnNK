@@ -1,154 +1,300 @@
-# Baut WordCraft und DeckCraft mit deutscher Rechtschreibung und FilmCraft mit Filmora-Import für
-# macOS (Universal: Apple Silicon + Intel) und veröffentlicht sie zusammen mit den Windows-ZIPs als
-# ein GitHub-Release.
+# Hält die modifizierten Versionen von WordCraft, DeckCraft und FilmCraft automatisch aktuell.
+#
+# Jede Nacht: Haben die Originale (storytold/*) eine neue Version, werden die Patches aus
+# crafts-deutsch/patches mit `git am -3` darauf gelegt, getestet, für macOS (Apple Silicon + Intel)
+# und Windows gebaut und im Release "crafts-deutsch" ausgetauscht. Passt ein Patch nicht mehr oder
+# scheitert ein Test, bleibt der letzte funktionierende Download stehen und ein Issue mit dem Label
+# `crafts-deutsch-kaputt` wird geöffnet; die geplante Claude-Aufgabe repariert den Patch.
 name: crafts-deutsch
 
 on:
+  schedule:
+    - cron: "23 3 * * *" # jede Nacht, ~04:23 Wiener Zeit
   push:
-    branches: [claude/magical-cerf-jmx3py, main]
+    branches: [main]
+    paths: ["crafts-deutsch/**", ".github/workflows/crafts-deutsch.yml"]
+  pull_request:
     paths: ["crafts-deutsch/**", ".github/workflows/crafts-deutsch.yml"]
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Alle Apps neu bauen, auch ohne neue Original-Version"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
-  group: crafts-deutsch-${{ github.ref }}
-  cancel-in-progress: true
+  group: crafts-deutsch-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: crafts-deutsch
 
 jobs:
-  macos:
-    name: macOS ${{ matrix.name }}
-    runs-on: macos-14
-    timeout-minutes: 120
+  plan:
+    name: Neue Original-Versionen?
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.p.outputs.build }}
+      shas: ${{ steps.p.outputs.shas }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" -p versions.json -O old.json 2>/dev/null || echo '{}' > old.json
+          shas='{}'; build='[]'
+          for app in wordcraft deckcraft filmcraft; do
+            sha=$(git ls-remote "https://github.com/storytold/$app" refs/heads/main | cut -f1)
+            patch=$(sha256sum "crafts-deutsch/patches/$app.patch" | cut -c1-16)
+            shas=$(jq -c --arg a "$app" --arg s "$sha" --arg p "$patch" '.[$a] = {sha: $s, patch: $p}' <<<"$shas")
+            old_sha=$(jq -r --arg a "$app" '.[$a].sha // ""' old.json)
+            old_patch=$(jq -r --arg a "$app" '.[$a].patch // ""' old.json)
+            if [ "$EVENT" != schedule ] || [ "${FORCE:-false}" = true ] || [ "$sha" != "$old_sha" ] || [ "$patch" != "$old_patch" ]; then
+              build=$(jq -c --arg a "$app" '. + [$a]' <<<"$build")
+              echo "$app: neu bauen (Original ${sha:0:12}, vorher ${old_sha:0:12})"
+            else
+              echo "$app: unverändert (${sha:0:12})"
+            fi
+          done
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "shas=$shas" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.app }} ${{ matrix.os == 'windows-latest' && 'Windows' || 'macOS' }}
+    needs: plan
+    if: needs.plan.outputs.build != '[]'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - app: wordcraft
-            name: WordCraft
-            sha: fd7f6621a1419c7c99f2293c9e99b1b7c4b87282
-            patch: wordcraft-deutsch.patch
-            dictionaries: true
-          - app: deckcraft
-            name: DeckCraft
-            sha: 90058395b78be26bb7ea7b4914a9f113c28d979d
-            patch: deckcraft-deutsch.patch
-            dictionaries: true
-          - app: filmcraft
-            name: FilmCraft
-            sha: 68919ed87aa6a097a4d21414ec7c438883f5fe22
-            patch: filmcraft-filmora.patch
-            dictionaries: false
+        app: ${{ fromJSON(needs.plan.outputs.build) }}
+        os: [macos-14, windows-latest]
+    defaults:
+      run:
+        shell: bash
     env:
+      APP: ${{ matrix.app }}
+      SHA: ${{ fromJSON(needs.plan.outputs.shas)[matrix.app].sha }}
       MACOSX_DEPLOYMENT_TARGET: "11.0"
-      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
 
-      - name: Quellcode holen und deutschen Patch anwenden
+      - name: Namen
         run: |
-          git init -q src && cd src
-          git remote add origin https://github.com/storytold/${{ matrix.app }}
-          git fetch -q --depth 1 origin ${{ matrix.sha }}
-          git checkout -q FETCH_HEAD
-          git -c user.name=build -c user.email=build@localhost am -q "$GITHUB_WORKSPACE/crafts-deutsch/patches/${{ matrix.patch }}"
-          git log --oneline -2
+          case "$APP" in
+            wordcraft) echo "NAME=WordCraft" >> "$GITHUB_ENV"; echo "TITLE=WordCraft – German Version" >> "$GITHUB_ENV" ;;
+            deckcraft) echo "NAME=DeckCraft" >> "$GITHUB_ENV"; echo "TITLE=DeckCraft – German Version" >> "$GITHUB_ENV" ;;
+            filmcraft) echo "NAME=FilmCraft" >> "$GITHUB_ENV"; echo "TITLE=FilmCraft – Filmora Edition" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Neueste Original-Version holen und Patch anwenden
+        run: |
+          set -euo pipefail
+          git clone -q --filter=blob:none "https://github.com/storytold/$APP" src
+          cd src
+          git checkout -q "$SHA"
+          git log --oneline -1
+          if ! git -c user.name=build -c user.email=build@localhost am -3 "$GITHUB_WORKSPACE/crafts-deutsch/patches/$APP.patch"; then
+            git am --show-current-patch=diff | head -50 || true
+            git status --short | head -30
+            echo "::error title=Patch passt nicht mehr::Der Patch für $APP passt nicht auf storytold/$APP ${SHA:0:12}."
+            exit 1
+          fi
 
       - name: Deutsche Oberfläche (craft-i18n)
         if: matrix.app == 'wordcraft'
         run: |
+          set -euo pipefail
           git init -q i18n && cd i18n
           git remote add origin https://github.com/storytold/craft-i18n
-          git fetch -q --depth 1 origin "$(cat ../src/craft-i18n.rev)"
+          git fetch -q --depth 1 origin "$(tr -d '[:space:]' < ../src/craft-i18n.rev)"
           git checkout -q FETCH_HEAD
-          printf '\tGerman (Austria)\tDeutsch (Österreich)\n\tGerman (Switzerland)\tDeutsch (Schweiz)\n' >> locales/de/wordcraft.tsv
+          tsv=locales/de/wordcraft.tsv
+          grep -q $'\tGerman (Austria)\t' "$tsv" || printf '\tGerman (Austria)\tDeutsch (Österreich)\n' >> "$tsv"
+          grep -q $'\tGerman (Switzerland)\t' "$tsv" || printf '\tGerman (Switzerland)\tDeutsch (Schweiz)\n' >> "$tsv"
           echo "CRAFT_I18N_DIR=$PWD" >> "$GITHUB_ENV"
+
+      - name: Deutsche Wörterbücher (LibreOffice igerman98, GPL)
+        if: matrix.app != 'filmcraft'
+        run: |
+          set -euo pipefail
+          mkdir -p dict
+          base=https://raw.githubusercontent.com/LibreOffice/dictionaries/master/de
+          for f in de_DE_frami.aff de_DE_frami.dic de_AT_frami.aff de_AT_frami.dic de_CH_frami.aff de_CH_frami.dic COPYING_GPLv2 COPYING_GPLv3 README_de_DE_frami.txt; do
+            curl -fsSL --retry 4 -o "dict/$f" "$base/$f"
+          done
+          mkdir -p bundle
+          if [ "$APP" = wordcraft ]; then
+            # WordCraft sucht `de_DE` und `de_CH`. Das österreichische Wörterbuch (kennt auch
+            # Jänner, Paradeiser) steht für Deutschland und Österreich, das Schweizer für die Schweiz.
+            cp dict/de_AT_frami.aff bundle/de_DE.aff; cp dict/de_AT_frami.dic bundle/de_DE.dic
+            cp dict/de_CH_frami.aff bundle/de_CH.aff; cp dict/de_CH_frami.dic bundle/de_CH.dic
+          else
+            cp dict/*_frami.* bundle/
+          fi
+          cp dict/COPYING_GPLv2 dict/COPYING_GPLv3 dict/README_de_DE_frami.txt bundle/
 
       - name: Rust
         run: |
           rustup update stable --no-self-update
           rustup default stable
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          if [ "$RUNNER_OS" = macOS ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
 
-      - name: Bauen (Apple Silicon + Intel)
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+          key: ${{ matrix.app }}
+
+      - name: Tests (macOS)
+        if: runner.os == 'macOS'
         working-directory: src
-        run: cargo build --release --locked -p ${{ matrix.app }} --target aarch64-apple-darwin --target x86_64-apple-darwin
-
-      - name: Deutsche Wörterbücher (LibreOffice, GPL)
-        if: matrix.dictionaries
-        run: |
-          mkdir dict
-          base=https://raw.githubusercontent.com/LibreOffice/dictionaries/master/de
-          for f in de_DE_frami.aff de_DE_frami.dic de_AT_frami.aff de_AT_frami.dic de_CH_frami.aff de_CH_frami.dic COPYING_GPLv2 COPYING_GPLv3 README_de_DE_frami.txt; do
-            curl -fsSL --retry 4 -o "dict/$f" "$base/$f"
-          done
-
-      - name: App-Bundle bauen und signieren (ad hoc)
         run: |
           set -euo pipefail
-          NAME=${{ matrix.name }}; APPBIN=${{ matrix.app }}
+          case "$APP" in
+            deckcraft) DECKCRAFT_GERMAN_DICTIONARIES="$GITHUB_WORKSPACE/dict" cargo test -p deckcraft-engine --lib spell ;;
+            filmcraft) cargo test -p filmcraft-interchange filmora ;;
+            wordcraft) echo "WordCraft wird nach dem Bauen mit dem echten Wörterbuch geprüft." ;;
+          esac
+
+      - name: Bauen (macOS, Apple Silicon + Intel)
+        if: runner.os == 'macOS'
+        working-directory: src
+        run: |
+          extra=(); [ "$APP" = wordcraft ] && extra=(-p wordcraft-cli)
+          cargo build --release -p "$APP" "${extra[@]}" --target aarch64-apple-darwin --target x86_64-apple-darwin
+
+      - name: Bauen (Windows)
+        if: runner.os == 'Windows'
+        working-directory: src
+        run: cargo build --release -p "$APP"
+
+      - name: Prüfung mit echtem Wörterbuch (WordCraft)
+        if: runner.os == 'macOS' && matrix.app == 'wordcraft'
+        run: |
+          set -euo pipefail
+          out=$(WORDCRAFT_DICTIONARIES="$GITHUB_WORKSPACE/bundle" src/target/aarch64-apple-darwin/release/wordcraft-cli run \
+            --cmd 'review.language={"lang":"de-AT","default":true}' \
+            --cmd 'text.insert={"text":"Im Jänner gründet der Kaffeeclubgründer eine Veranstaltungstechnik-Firma. KaffeeClub ist falsch, Strasse auch."}' \
+            --cmd 'review.issues' --print)
+          echo "$out" | tail -1
+          for bad in KaffeeClub Strasse; do echo "$out" | grep -q "\"text\":\"$bad\"" || { echo "::error::$bad wurde nicht markiert"; exit 1; }; done
+          for good in Jänner Kaffeeclubgründer Veranstaltungstechnik; do
+            if echo "$out" | grep -q "\"text\":\"$good\""; then echo "::error::$good wurde fälschlich markiert"; exit 1; fi
+          done
+
+      - name: Paket (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src/Cargo.toml | head -1)
-          APP="out/$NAME.app"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/dictionaries"
-          lipo -create -output "$APP/Contents/MacOS/$NAME" \
-            "src/target/aarch64-apple-darwin/release/$APPBIN" "src/target/x86_64-apple-darwin/release/$APPBIN"
-          lipo -info "$APP/Contents/MacOS/$NAME"
-          cp "src/assets/app-icon/$APPBIN.icns" "$APP/Contents/Resources/$NAME.icns"
-          if [ -d dict ]; then cp dict/* "$APP/Contents/Resources/dictionaries/"; else rmdir "$APP/Contents/Resources/dictionaries"; fi
-          sed -e "s/@VERSION@/$VERSION-de/g" -e "s/@SHORT_VERSION@/${VERSION%%-*}/g" -e "s/@BUILD_SHA@/${{ matrix.sha }}/g" \
-            src/packaging/macos/Info.plist.in > "$APP/Contents/Info.plist"
-          plutil -lint "$APP/Contents/Info.plist"
-          printf 'APPL????' > "$APP/Contents/PkgInfo"
-          xattr -cr "$APP"
-          codesign --force --sign - --entitlements src/packaging/macos/entitlements.plist "$APP/Contents/MacOS/$NAME"
-          codesign --force --sign - --entitlements src/packaging/macos/entitlements.plist "$APP"
-          codesign --verify --strict --deep --verbose=2 "$APP"
-          cp src/LICENSE-MIT src/LICENSE-APACHE src/NOTICE out/
+          APPDIR="out/$NAME.app"
+          mkdir -p "$APPDIR/Contents/MacOS" "$APPDIR/Contents/Resources"
+          lipo -create -output "$APPDIR/Contents/MacOS/$NAME" \
+            "src/target/aarch64-apple-darwin/release/$APP" "src/target/x86_64-apple-darwin/release/$APP"
+          cp "src/assets/app-icon/$APP.icns" "$APPDIR/Contents/Resources/$NAME.icns"
+          if [ -d bundle ]; then cp -R bundle "$APPDIR/Contents/Resources/dictionaries"; fi
+          sed -e "s/@VERSION@/$VERSION-de/g" -e "s/@SHORT_VERSION@/${VERSION%%-*}/g" -e "s/@BUILD_SHA@/$SHA/g" \
+            src/packaging/macos/Info.plist.in > "$APPDIR/Contents/Info.plist"
+          plutil -lint "$APPDIR/Contents/Info.plist"
+          printf 'APPL????' > "$APPDIR/Contents/PkgInfo"
+          xattr -cr "$APPDIR"
+          codesign --force --sign - --entitlements src/packaging/macos/entitlements.plist "$APPDIR/Contents/MacOS/$NAME"
+          codesign --force --sign - --entitlements src/packaging/macos/entitlements.plist "$APPDIR"
+          codesign --verify --strict --deep --verbose=2 "$APPDIR"
           (cd out && ditto -c -k --keepParent "$NAME.app" "../$NAME-Deutsch-macOS.zip")
           ls -la "$NAME-Deutsch-macOS.zip"
 
-      - name: Starttest (Wörterbuch wird im Bundle gefunden)
-        if: matrix.app == 'wordcraft'
-        working-directory: src
+      - name: Paket (Windows)
+        if: runner.os == 'Windows'
         run: |
-          cargo build --release --locked -p wordcraft-cli --target aarch64-apple-darwin
-          mkdir -p "target/aarch64-apple-darwin/Resources" && cp -R ../out/WordCraft.app/Contents/Resources/dictionaries target/aarch64-apple-darwin/Resources/
-          out=$(target/aarch64-apple-darwin/release/wordcraft-cli run \
-            --cmd 'review.language={"lang":"de-AT"}' \
-            --cmd 'text.insert={"text":"Im Jänner gründet der Kaffeeclubgründer etwas. KaffeeClub ist falsch."}' \
-            --cmd 'review.issues' --print)
-          echo "$out"
-          echo "$out" | grep -q '"text":"KaffeeClub"'
-          if echo "$out" | grep -q '"text":"Kaffeeclubgründer"'; then echo "Kompositum fälschlich markiert"; exit 1; fi
+          set -euo pipefail
+          D="pkg/$NAME-Deutsch"
+          mkdir -p "$D"
+          cp "src/target/release/$APP.exe" "$D/"
+          if [ -d bundle ]; then cp -R bundle "$D/dictionaries"; fi
+          cp src/LICENSE-MIT src/LICENSE-APACHE src/NOTICE "$D/"
+          sed -e "s/{TITLE}/$TITLE/g" -e "s/{EXE}/$APP.exe/g" crafts-deutsch/LIESMICH.txt > "$D/LIESMICH.txt"
+          (cd pkg && 7z a -tzip -mx=9 "../$NAME-Deutsch-Windows-x64.zip" "$NAME-Deutsch" > /dev/null)
+          ls -la "$NAME-Deutsch-Windows-x64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}-macOS
-          path: ${{ matrix.name }}-Deutsch-macOS.zip
+          name: ${{ matrix.app }}-${{ runner.os }}
+          path: "*-Deutsch-*.zip"
 
   release:
-    name: Release veröffentlichen
-    needs: macos
+    name: Release aktualisieren
+    needs: [plan, build]
+    if: always() && needs.plan.outputs.build != '[]' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD: ${{ needs.plan.outputs.build }}
+      SHAS: ${{ needs.plan.outputs.shas }}
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: mac
+          path: dl
           merge-multiple: true
-      - name: Ein Release mit allen Downloads
-        env:
-          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
+      - name: Downloads austauschen, Stand notieren, kaputte Apps melden
         run: |
           set -euo pipefail
-          TAG=crafts-deutsch
-          files=(mac/WordCraft-Deutsch-macOS.zip mac/DeckCraft-Deutsch-macOS.zip mac/FilmCraft-Deutsch-macOS.zip
-                 crafts-deutsch/downloads/WordCraft-Deutsch-Windows-x64.zip crafts-deutsch/downloads/DeckCraft-Deutsch-Windows-x64.zip)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" --notes-file crafts-deutsch/RELEASE.md --title "WordCraft & DeckCraft – German Version · FilmCraft – Filmora Edition (modifiziert, inoffiziell)"
-          else
-            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --latest \
-              --title "WordCraft & DeckCraft – German Version · FilmCraft – Filmora Edition (modifiziert, inoffiziell)" --notes-file crafts-deutsch/RELEASE.md
+          mkdir -p dl
+          gh release download "$TAG" -p versions.json -O versions.json 2>/dev/null || echo '{}' > versions.json
+          gh label create crafts-deutsch-kaputt --color B60205 --description "Automatische Aktualisierung gescheitert" --force >/dev/null
+          files=()
+          for app in $(jq -r '.[]' <<<"$BUILD"); do
+            case "$app" in wordcraft) N=WordCraft ;; deckcraft) N=DeckCraft ;; filmcraft) N=FilmCraft ;; esac
+            sha=$(jq -r --arg a "$app" '.[$a].sha' <<<"$SHAS")
+            patch=$(jq -r --arg a "$app" '.[$a].patch' <<<"$SHAS")
+            ok=true
+            for f in "$N-Deutsch-macOS.zip" "$N-Deutsch-Windows-x64.zip"; do
+              if [ -f "dl/$f" ]; then files+=("dl/$f"); else ok=false; fi
+            done
+            title="crafts-deutsch: $N lässt sich nicht mehr automatisch aktualisieren"
+            open=$(gh issue list --label crafts-deutsch-kaputt --state open --search "$N in:title" --json number --jq '.[0].number // empty')
+            if $ok; then
+              jq --arg a "$app" --arg s "$sha" --arg p "$patch" --arg d "$(date -u +%Y-%m-%d)" '.[$a] = {sha: $s, patch: $p, date: $d}' versions.json > v && mv v versions.json
+              if [ -n "$open" ]; then gh issue close "$open" --comment "Wieder grün: $N ist auf storytold/$app ${sha:0:12} aktualisiert ($RUN)."; fi
+            else
+              body=$(printf '%s\n\n%s\n\n%s' \
+                "Die nächtliche Aktualisierung von **$N** auf [storytold/$app@${sha:0:12}](https://github.com/storytold/$app/commit/$sha) ist gescheitert: Patch passt nicht mehr, Test oder Build rot. Der letzte funktionierende Download bleibt im Release." \
+                "Log: $RUN" \
+                "Die geplante Claude-Aufgabe repariert \`crafts-deutsch/patches/$app.patch\` und öffnet dafür einen PR.")
+              if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$title" --label crafts-deutsch-kaputt --body "$body"; fi
+            fi
+          done
+          {
+            cat crafts-deutsch/RELEASE.md
+            echo
+            echo "## Stand"
+            echo
+            echo "| App | auf Original-Version | aktualisiert |"
+            echo "|---|---|---|"
+            for app in wordcraft deckcraft filmcraft; do
+              s=$(jq -r --arg a "$app" '.[$a].sha // ""' versions.json); d=$(jq -r --arg a "$app" '.[$a].date // "–"' versions.json)
+              [ -n "$s" ] && echo "| $app | [${s:0:12}](https://github.com/storytold/$app/commit/$s) | $d |"
+            done
+            echo
+            echo "Wird jede Nacht automatisch an neue Versionen der Originale angepasst."
+          } > notes.md
+          title="WordCraft & DeckCraft – German Version · FilmCraft – Filmora Edition (modifiziert, inoffiziell)"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --latest --title "$title" --notes-file notes.md
           fi
+          if [ ${#files[@]} -gt 0 ]; then gh release upload "$TAG" "${files[@]}" --clobber; fi
+          gh release upload "$TAG" versions.json --clobber
+          gh release edit "$TAG" --title "$title" --notes-file notes.md

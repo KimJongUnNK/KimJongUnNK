@@ -1,0 +1,228 @@
+From 7a4e42fb582816b438077df86b21854793ec6ae1 Mon Sep 17 00:00:00 2001
+From: Emil Boenke <boenkeemil@gmail.com>
+Date: Tue, 3 Nov 2026 09:51:26 +0000
+Subject: [PATCH] German by default on German-speaking systems, and bundled
+ dictionaries
+
+craft-proof now checks German (compounds included) when a German Hunspell
+dictionary is found, but new documents were still written in US English on
+an Austrian or German system, and no dictionary came with the program.
+
+- new documents follow the region's German: a German interface, or an English
+  one on a German-speaking system, writes de-AT / de-DE / de-CH
+- a `dictionaries` folder beside the program (or in the macOS bundle's
+  Contents/Resources) is searched when no dictionaries folder is set
+- German (Austria) and German (Switzerland) in the Language dialog and the
+  region list
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
+---
+ crates/engine/src/cmd/options.rs              | 17 +++++++-
+ crates/engine/src/session/query.rs            | 12 ++++++
+ crates/engine/src/tests.rs                    | 39 +++++++++++++++++++
+ crates/ui-egui/src/app.rs                     |  7 +++-
+ crates/ui-egui/src/app/prefs.rs               |  7 ++--
+ .../src/dialogs/dialogs_layout/text.rs        |  4 +-
+ crates/ui-egui/src/i18n.rs                    |  2 +
+ crates/ui-egui/src/options.rs                 |  6 ++-
+ 8 files changed, 83 insertions(+), 11 deletions(-)
+
+diff --git a/crates/engine/src/cmd/options.rs b/crates/engine/src/cmd/options.rs
+index add7d879..9138700b 100644
+--- a/crates/engine/src/cmd/options.rs
++++ b/crates/engine/src/cmd/options.rs
+@@ -272,7 +272,20 @@ fn folder_setting(key: &str, f: &str, local_only: bool) -> Result<Option<String>
+ }
+ 
+ /// Search `folder` for Hunspell dictionaries before the system locations, from now on (the saved
+-/// setting, applied when the app starts and when it changes).
++/// setting, applied when the app starts and when it changes). Without one, a `dictionaries`
++/// folder shipped with the program is searched ([`bundled_dictionaries_folder`]).
+ pub fn use_dictionaries_folder(folder: Option<&str>) {
+-    wordcraft_proof::set_dictionaries_folder(folder.map(std::path::PathBuf::from));
++    wordcraft_proof::set_dictionaries_folder(folder.map(std::path::PathBuf::from).or_else(bundled_dictionaries_folder));
++}
++
++/// A `dictionaries` folder shipped with the program: beside the executable (a portable copy), or
++/// in a macOS app bundle's `Contents/Resources`. `None` when there is none.
++pub fn bundled_dictionaries_folder() -> Option<std::path::PathBuf> {
++    let exe = std::env::current_exe().ok()?;
++    let dir = exe.parent()?;
++    let mut candidates = vec![dir.join("dictionaries")];
++    if let Some(contents) = dir.parent() {
++        candidates.push(contents.join("Resources").join("dictionaries"));
++    }
++    candidates.into_iter().find(|d| d.is_dir())
+ }
+diff --git a/crates/engine/src/session/query.rs b/crates/engine/src/session/query.rs
+index fbefe1c2..fabc0ada 100644
+--- a/crates/engine/src/session/query.rs
++++ b/crates/engine/src/session/query.rs
+@@ -191,6 +191,18 @@ impl Session {
+             .unwrap_or_else(|| "es-ES".into())
+     }
+ 
++    /// The German of the region in effect (`de-AT` on an Austrian system, `de-CH` on a Swiss
++    /// one, `de-DE` for German without a territory; ISO 639-2 `deu`/`ger` count as German), or
++    /// `None` when the region's language isn't German. A German interface, and an English one on
++    /// a German-speaking system, write new documents in it, so German text is proofed in German
++    /// from the first word instead of as US English.
++    pub fn region_german(&self) -> Option<String> {
++        let r = self.region();
++        matches!(r.language.as_str(), "de" | "deu" | "ger")
++            .then(|| format!("de-{}", if r.territory.is_empty() { "DE" } else { r.territory.as_str() }))
++            .and_then(|t| wordcraft_proof::lang::normalize_tag(&t))
++    }
++
+     /// The unit rulers and dialogs show lengths in: the user's choice, else the region's.
+     pub fn units(&self) -> wordcraft_geom::Unit {
+         self.prefs.units.unwrap_or_else(|| self.region().units())
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index d97948c9..d2190e37 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -8891,6 +8891,31 @@ fn new_documents_follow_the_regions_english() {
+     assert_eq!(s.region_english(), None);
+ }
+ 
++/// A German interface, or an English one on a German-speaking system, writes new documents in
++/// the region's German: Austria's on an Austrian system, Switzerland's on a Swiss one.
++#[test]
++fn new_documents_follow_the_regions_german() {
++    let mut s = s();
++    s.system_region = wordcraft_geom::Region::from_tag("de_AT.UTF-8");
++    assert_eq!(s.region_german().as_deref(), Some("de-AT"));
++    s.set_editing_language(s.region_german().as_deref());
++    assert_eq!(s.doc.styles.default_chr.lang.as_deref(), Some("de-AT"), "the untouched document follows");
++    for (tag, german) in [
++        ("de-CH", Some("de-CH")),
++        ("de-DE", Some("de-DE")),
++        ("deu-LI", Some("de-LI")),
++        ("de", Some("de-DE")),
++        ("en-US", None),
++        ("fr-FR", None),
++        ("auto", Some("de-AT")),
++    ] {
++        run(&mut s, "file.options", json!({"region": tag}));
++        assert_eq!(s.region_german().as_deref(), german, "{tag}");
++    }
++    s.system_region = wordcraft_geom::Region::from_tag("en_GB.UTF-8");
++    assert_eq!(s.region_german(), None);
++}
++
+ /// A Spanish interface writes new documents in the region's Spanish (#3360): Uruguay's on a
+ /// Uruguayan system, Mexico's on a Mexican one, Spain's elsewhere.
+ #[test]
+@@ -11981,3 +12006,17 @@ fn page_down_extends_a_selection_that_ends_in_collapsed_outline_text() {
+     assert!(s.sel.focus.path.0[0] > 6, "Page Down extends the selection a page on: {:?}", s.sel.focus);
+     assert!(s.layout().caret(&s.sel.focus).is_some(), "to a place the outline shows");
+ }
++
++/// A `dictionaries` folder beside the program is searched when no dictionaries folder is set: a
++/// portable copy (or a macOS app bundle's `Contents/Resources/dictionaries`) carries its own.
++#[test]
++fn bundled_dictionaries_beside_the_program_are_found() {
++    let exe = std::env::current_exe().unwrap();
++    let dir = exe.parent().unwrap().join("dictionaries");
++    let existed = dir.is_dir();
++    std::fs::create_dir_all(&dir).unwrap();
++    assert_eq!(crate::cmd::options::bundled_dictionaries_folder().as_deref(), Some(dir.as_path()));
++    if !existed {
++        let _ = std::fs::remove_dir(&dir);
++    }
++}
+diff --git a/crates/ui-egui/src/app.rs b/crates/ui-egui/src/app.rs
+index cf2670e5..8bfac3f2 100644
+--- a/crates/ui-egui/src/app.rs
++++ b/crates/ui-egui/src/app.rs
+@@ -227,11 +227,14 @@ impl WordApp {
+         // (a Polish interface: Polish spelling, grammar and hyphenation from the first word).
+         // An English interface writes the region's English (English (UK) on a British system,
+         // #1045), a Spanish one the region's Spanish (Spanish (Uruguay) on a Uruguayan system,
+-        // Spain's elsewhere, #3360).
++        // Spain's elsewhere, #3360). A German interface writes the region's German (German
++        // (Austria) on an Austrian system), and so does an English one on a German-speaking
++        // system: German text is then never checked as US English.
+         let editing = match lang.editing_lang() {
+             Some(t) => Some(t.to_string()),
+-            None if lang.code() == "en" => self.session.region_english(),
++            None if lang.code() == "en" => self.session.region_english().or_else(|| self.session.region_german()),
+             None if lang.code() == "es" => Some(self.session.region_spanish()),
++            None if lang.code() == "de" => Some(self.session.region_german().unwrap_or_else(|| "de-DE".into())),
+             None => None,
+         };
+         if self.applied_editing.as_ref().is_none_or(|(l, e)| *l != lang || *e != editing) {
+diff --git a/crates/ui-egui/src/app/prefs.rs b/crates/ui-egui/src/app/prefs.rs
+index 872cd051..dc9239ca 100644
+--- a/crates/ui-egui/src/app/prefs.rs
++++ b/crates/ui-egui/src/app/prefs.rs
+@@ -63,10 +63,9 @@ impl WordApp {
+         self.session.prefs = std::mem::take(&mut self.ui.editing);
+         // Check spelling as you type follows the saved preference (#1792).
+         self.session.view.proofing = self.session.prefs.check_spelling;
+-        // The saved dictionaries folder (#1063) is searched from the start.
+-        if let Some(f) = self.session.prefs.dictionaries_folder.as_deref() {
+-            wordcraft_engine::cmd::options::use_dictionaries_folder(Some(f));
+-        }
++        // The saved dictionaries folder (#1063) is searched from the start; without one, the
++        // dictionaries shipped beside the program.
++        wordcraft_engine::cmd::options::use_dictionaries_folder(self.session.prefs.dictionaries_folder.as_deref());
+         self.session.read_aloud.set_rate(self.ui.read_aloud_rate);
+         self.session.read_aloud.skip_citations = self.ui.read_aloud_skip_citations;
+         self.session.view.dark_mode = self.ui.dark_page;
+diff --git a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
+index 30a56318..f6d60f3f 100644
+--- a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
++++ b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
+@@ -255,7 +255,7 @@ pub(super) fn manual_ui(app: &mut WordApp, ui: &mut Ui, f: &mut ManualForm) -> b
+ // Language
+ 
+ /// Proofing languages offered, by BCP 47 tag, with their English names (translated for display).
+-pub const LANGUAGES: [(&str, &str); 38] = [
++pub const LANGUAGES: [(&str, &str); 40] = [
+     ("en-US", "English (United States)"),
+     ("en-GB", "English (United Kingdom)"),
+     ("en-AU", "English (Australia)"),
+@@ -265,6 +265,8 @@ pub const LANGUAGES: [(&str, &str); 38] = [
+     ("en-NZ", "English (New Zealand)"),
+     ("en-ZA", "English (South Africa)"),
+     ("de-DE", "German (Germany)"),
++    ("de-AT", "German (Austria)"),
++    ("de-CH", "German (Switzerland)"),
+     ("fr-FR", "French (France)"),
+     ("es-ES", "Spanish (Spain)"),
+     ("es-MX", "Spanish (Mexico)"),
+diff --git a/crates/ui-egui/src/i18n.rs b/crates/ui-egui/src/i18n.rs
+index 63a1c52d..f908b58a 100644
+--- a/crates/ui-egui/src/i18n.rs
++++ b/crates/ui-egui/src/i18n.rs
+@@ -99,6 +99,8 @@ pub static LANGUAGES: [LangInfo; 27] = [
+     LangInfo { code: "et", prefer_hans: false, editing_lang: None },
+     // German, neutral across Germany, Austria and Switzerland; `de`, `de-DE`, `de-AT`, `de-CH` …
+     // resolve here.
++    // No fixed editing language: new documents are written in the region's German
++    // (`Session::region_german`; Germany's elsewhere).
+     LangInfo { code: "de", prefer_hans: false, editing_lang: None },
+     // Russian; `ru`, `ru-RU`, `ru_RU.UTF-8` and other regions resolve here.
+     LangInfo { code: "ru", prefer_hans: false, editing_lang: None },
+diff --git a/crates/ui-egui/src/options.rs b/crates/ui-egui/src/options.rs
+index 40e27376..1fe6cfce 100644
+--- a/crates/ui-egui/src/options.rs
++++ b/crates/ui-egui/src/options.rs
+@@ -108,8 +108,10 @@ impl MeasureExt for egui::DragValue<'_> {
+ 
+ /// Regions offered in File › Options › Advanced › Region (any locale tag works through
+ /// `file.options`): Letter and A4 countries, decimal point and decimal comma.
+-const REGIONS: [&str; 16] =
+-    ["en-US", "en-CA", "en-GB", "en-AU", "en-IN", "es-MX", "es-ES", "pt-BR", "fr-FR", "de-DE", "it-IT", "pl-PL", "ru-RU", "ja-JP", "zh-CN", "ko-KR"];
++const REGIONS: [&str; 18] = [
++    "en-US", "en-CA", "en-GB", "en-AU", "en-IN", "es-MX", "es-ES", "pt-BR", "fr-FR", "de-DE", "de-AT", "de-CH", "it-IT", "pl-PL", "ru-RU", "ja-JP",
++    "zh-CN", "ko-KR",
++];
+ 
+ /// The units offered, with their names.
+ pub const UNITS: [(Unit, &str); 5] = [
+-- 
+2.43.0
+
