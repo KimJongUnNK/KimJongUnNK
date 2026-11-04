@@ -22,6 +22,7 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 - **Native Notifications:** Die Web-Notification-API (`new Notification`, `ServiceWorkerRegistration.showNotification`, `permissions.query`) wird auf echte OS-Notifications umgeleitet. Klick auf die Notification holt das Fenster nach vorn, und die Taskleiste blinkt, solange das Fenster nicht fokussiert ist.
 - **Ungelesen-Badge:** Wird aus dem Seitentitel `(3) Chat | Microsoft Teams` gelesen und landet in Fenstertitel, Tray-Tooltip und Taskleiste (Windows: roter Overlay-Punkt, macOS/Linux: Badge-Zahl).
 - **Links:** Links aus Chats öffnen im Standardbrowser. Microsoft-Login-Popups (SSO) bleiben in der App. `mailto:`, `tel:` und `sip:` gehen ans System. `file:`, `javascript:` und unbekannte Protokolle werden blockiert.
+- **Meetings beitreten:** Meeting-Links (`teams.microsoft.com/meet/…`, `/l/meetup-join/…`) und die `msteams:`-Übergabe der „In der App öffnen?“-Seite landen direkt im Hauptfenster, auf genau der Route, die Teams' eigener „Join on the web“-Button nimmt. Kein nacktes Popup, kein „Kein Programm zum Öffnen der URL“-Dialog. Auf Windows wird der WebView2-Hinweis „Diese Seite versucht, Microsoft Teams zu öffnen“ für `msteams:` abgefangen. Auf macOS ist Lean Teams für `msteams:` registriert, Meeting-Links aus Safari, Mail oder Kalender öffnen also direkt in Lean Teams.
 - **Single Instance:** Ein zweiter Start fokussiert das laufende Fenster.
 - **Autostart:** Startet beim Login versteckt im Tray (`--minimized`).
 - **Fensterposition und -größe** werden gespeichert.
@@ -178,7 +179,7 @@ Das Skript summiert RAM über den **ganzen Prozessbaum** (Host + alle `msedgeweb
 
 - **Linux:** WebKitGTK ist nicht Chromium. Chat, Kanäle und Dateien funktionieren, Anrufe und Screen-Sharing sind je nach WebKitGTK-Version eingeschränkt. Auf Windows (WebView2 = Chromium) läuft alles inklusive Calls. Auf macOS gilt der Safari-Support von Teams.
 - **Keine Outlook-Integration:** Kein Teams-Meeting-Add-in in Outlook und kein Präsenzstatus in Office. Genau das ist ein Teil der Ersparnis.
-- **`msteams:`-Deep-Links** (z. B. "In Desktop-App öffnen") öffnen den offiziellen Client, falls installiert. Lean Teams registriert das Protokoll nicht.
+- **`msteams:`-Links von außen:** Nur auf macOS registriert sich Lean Teams dafür. Auf Windows und Linux öffnen `msteams:`-Links aus anderen Apps weiter den offiziellen Client, falls installiert. Innerhalb von Lean Teams werden sie auf allen Systemen selbst behandelt.
 - **Inoffiziell:** Lean Teams ist nicht von Microsoft. Es lädt nur die öffentliche Web-App, und Microsoft kann dort jederzeit etwas ändern.
 
 ## Sicherheit

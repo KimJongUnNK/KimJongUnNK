@@ -19,7 +19,10 @@ mod webview2;
 
 use config::Config;
 use policy::Route;
-use std::sync::Mutex;
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -82,9 +85,50 @@ fn open_link<R: Runtime>(app: AppHandle<R>, url: String) {
     let Ok(url) = url::Url::parse(&url) else {
         return;
     };
-    if policy::route_link(&url) == Route::External {
-        open_external(&app, &url);
+    match policy::route_link(&url) {
+        Route::External => open_external(&app, &url),
+        Route::Redirect(target) => {
+            open_in_main(&app, target);
+        }
+        Route::InApp | Route::Block => {}
     }
+}
+
+/// Last deep-link redirect, so a link that keeps bouncing between the
+/// launcher and `msteams:` is followed once and then left to the launcher's
+/// own buttons instead of looping.
+static LAST_REDIRECT: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+const REDIRECT_LOOP_WINDOW: Duration = Duration::from_secs(15);
+
+/// A Teams link opened from outside the app before the window existed.
+static PENDING_LINK: Mutex<Option<url::Url>> = Mutex::new(None);
+
+/// Loads a Teams deep link (meeting join, chat link, `msteams:` hand-off)
+/// in the main window and brings it to the front. Returns false when the
+/// same link was just followed, i.e. it is looping.
+fn open_in_main<R: Runtime>(app: &AppHandle<R>, target: url::Url) -> bool {
+    {
+        let mut last = LAST_REDIRECT.lock().unwrap();
+        if let Some((prev, at)) = last.as_ref() {
+            if prev == target.as_str() && at.elapsed() < REDIRECT_LOOP_WINDOW {
+                return false;
+            }
+        }
+        *last = Some((target.to_string(), Instant::now()));
+    }
+    let Some(window) = app.get_webview_window(MAIN) else {
+        *PENDING_LINK.lock().unwrap() = Some(target);
+        return true;
+    };
+    show_main(app);
+    // Navigation callbacks run inside the webview's policy decision; start
+    // the new load after it returns.
+    std::thread::spawn(move || {
+        if let Err(err) = window.navigate(target) {
+            eprintln!("lean-teams: could not open deep link: {err}");
+        }
+    });
+    true
 }
 
 fn set_low_memory<R: Runtime>(window: &WebviewWindow<R>, low: bool) {
@@ -200,10 +244,22 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
                     open_external(&nav_app, url);
                     false
                 }
+                // If the link is looping, let a web page through so the
+                // launcher can show its own "Join on the web" button.
+                Route::Redirect(target) => {
+                    !open_in_main(&nav_app, target) && url.scheme() != "msteams"
+                }
                 Route::Block => false,
             })
+            // Allowed popups are bare webviews without these handlers, so
+            // meeting links must never end up in one: there the launcher's
+            // `msteams:` hand-off would reach the OS.
             .on_new_window(move |url, _features| match policy::route_new_window(&url) {
                 Route::InApp => NewWindowResponse::Allow,
+                Route::Redirect(target) => {
+                    open_in_main(&popup_app, target);
+                    NewWindowResponse::Deny
+                }
                 Route::External => {
                     open_external(&popup_app, &url);
                     NewWindowResponse::Deny
@@ -246,6 +302,13 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
     }
 
     let window = builder.build()?;
+    #[cfg(windows)]
+    {
+        let link_app = app.clone();
+        webview2::intercept_teams_links(window.as_ref(), move |target| {
+            open_in_main(&link_app, target);
+        });
+    }
     let _ = window.set_zoom(overlay_settings.zoom());
     if start_hidden {
         set_low_memory(&window, true);
@@ -439,7 +502,12 @@ fn main() {
                 unread: Mutex::new(0),
             });
             build_tray(app.handle())?;
-            build_main_window(app.handle(), start_hidden)?;
+            let pending = PENDING_LINK.lock().unwrap().take();
+            build_main_window(app.handle(), start_hidden && pending.is_none())?;
+            if let Some(target) = pending {
+                *LAST_REDIRECT.lock().unwrap() = None;
+                open_in_main(app.handle(), target);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -487,6 +555,17 @@ fn main() {
             // Clicking the Dock icon brings back a window closed to the tray.
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => show_main(app),
+            // `msteams:` links from Safari, Mail, Calendar, … (Lean Teams is
+            // registered for the scheme in Info.plist).
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                for url in urls {
+                    if let Some(target) = policy::teams_web_link(&url) {
+                        *LAST_REDIRECT.lock().unwrap() = None;
+                        open_in_main(app, target);
+                    }
+                }
+            }
             _ => {}
         });
 }
