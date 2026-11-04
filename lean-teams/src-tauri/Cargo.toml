@@ -1,0 +1,38 @@
+[package]
+name = "lean-teams"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+description = "Unofficial lightweight desktop shell for the Microsoft Teams web app"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2.5"
+notify-rust = "4.18"
+tauri-plugin-opener = "2.7"
+tauri-plugin-window-state = "2.5"
+tauri-plugin-autostart = "2.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSSet", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord"] }
+
+[profile.release]
+# Size over speed: the heavy lifting happens inside the system webview anyway.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
