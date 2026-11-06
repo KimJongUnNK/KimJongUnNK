@@ -1,4 +1,4 @@
-From ee63b1089efc9afb150d6aa4b97b1ab9f70f13eb Mon Sep 17 00:00:00 2001
+From 354bd86835da6ebf97142139ae554952d265b2ca Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 19:00:40 +0000
 Subject: [PATCH 1/4] Import Wondershare Filmora projects (.wfp)
@@ -143,10 +143,10 @@ index fb828bc1..579f01ce 100644
  /// The interchange format of a file, if it is one (by content, with the extension as a hint).
  pub fn detect(path: &str, bytes: &[u8]) -> Option<Format> {
 diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
-index 56d05b70..3a29bdf3 100644
+index a090b02b..5a1655c7 100644
 --- a/crates/engine/src/lib.rs
 +++ b/crates/engine/src/lib.rs
-@@ -1362,6 +1362,8 @@ mod export_tests;
+@@ -1363,6 +1363,8 @@ mod export_tests;
  #[cfg(test)]
  mod file_tests;
  #[cfg(test)]
@@ -156,7 +156,7 @@ index 56d05b70..3a29bdf3 100644
  #[cfg(test)]
  mod history_tests;
 diff --git a/crates/engine/src/media_browser.rs b/crates/engine/src/media_browser.rs
-index 6fdda50a..280ee6f7 100644
+index af4b9461..4fa61321 100644
 --- a/crates/engine/src/media_browser.rs
 +++ b/crates/engine/src/media_browser.rs
 @@ -78,7 +78,7 @@ pub const DEFAULT_COLUMNS: [&str; 5] = ["Name", "Frame Rate", "Media Duration",
@@ -1179,20 +1179,20 @@ index 8daeca64..a9a7b4d2 100644
      Ok((text.into_bytes(), report))
  }
 diff --git a/crates/ui-egui/src/app/files.rs b/crates/ui-egui/src/app/files.rs
-index 137f5d4f..7c569623 100644
+index 0b3e856b..ff24d256 100644
 --- a/crates/ui-egui/src/app/files.rs
 +++ b/crates/ui-egui/src/app/files.rs
 @@ -15,7 +15,7 @@ impl FilmcraftApp {
                      .iter()
                      .chain(filmcraft_media::AUDIO_EXTENSIONS)
                      .chain(filmcraft_media::STILL_EXTENSIONS)
--                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf"])
-+                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "wfp"])
+-                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "prfpset"])
++                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "prfpset", "wfp"])
                      .copied()
                      .collect();
                  let bin = params.get("bin").cloned();
 diff --git a/docs/file-format-parity.md b/docs/file-format-parity.md
-index 029729c4..357862e6 100644
+index 0ddb74d8..12f3f477 100644
 --- a/docs/file-format-parity.md
 +++ b/docs/file-format-parity.md
 @@ -21,6 +21,7 @@ only). "Tested" names the evidence.
@@ -1207,7 +1207,7 @@ index 029729c4..357862e6 100644
 2.43.0
 
 
-From cecbbbe52e1d89492b60b58c4c882c2a7ab436ba Mon Sep 17 00:00:00 2001
+From f730bedeef86c3f24f497220338edc74872ab2e4 Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Tue, 3 Nov 2026 00:29:12 +0000
 Subject: [PATCH 2/4] Open Filmora projects with File > Open and by dropping
@@ -1241,10 +1241,10 @@ index 34eb7e24..0914da21 100644
                  // filter hides every saved project; "All files" keeps them reachable.
                  .add_filter(filmcraft_ui_egui::i18n::t("All files"), &file_filters::all_files())
 diff --git a/crates/engine/src/commands.rs b/crates/engine/src/commands.rs
-index c0f17b8b..c1d272d4 100644
+index 843576a6..7aaab03c 100644
 --- a/crates/engine/src/commands.rs
 +++ b/crates/engine/src/commands.rs
-@@ -5219,6 +5219,11 @@ pub(crate) fn install_project(s: &mut Session, proj: filmcraft_project::Project,
+@@ -5277,6 +5277,11 @@ pub(crate) fn install_project(s: &mut Session, proj: filmcraft_project::Project,
  
  fn open_project(s: &mut Session, path: &str) -> Result<Value> {
      let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -1256,7 +1256,7 @@ index c0f17b8b..c1d272d4 100644
      let loaded = filmcraft_format::decode(&bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
      let (from, migrated) = (loaded.schema_version, loaded.migrated());
      crate::masks::discard_jobs(s);
-@@ -5239,6 +5244,25 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
+@@ -5297,6 +5302,25 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
      Ok(json!({"path": path, "schemaVersion": from, "migrated": migrated, "missingMedia": missing}))
  }
  
@@ -1316,10 +1316,10 @@ index ec2cb67b..8e739089 100644
 +    let _ = std::fs::remove_dir_all(&d);
 +}
 diff --git a/crates/ui-egui/src/app/input.rs b/crates/ui-egui/src/app/input.rs
-index b85884b5..f769c687 100644
+index b911e4be..1b0d147d 100644
 --- a/crates/ui-egui/src/app/input.rs
 +++ b/crates/ui-egui/src/app/input.rs
-@@ -118,7 +118,8 @@ impl FilmcraftApp {
+@@ -139,7 +139,8 @@ impl FilmcraftApp {
  
  /// Whether a dropped file is a FilmCraft project (opened, not imported).
  fn is_project_file(path: &str) -> bool {
@@ -1333,7 +1333,7 @@ index b85884b5..f769c687 100644
 2.43.0
 
 
-From 6dccc5c3e72a1042db53195ec3f1e65c1dc7897d Mon Sep 17 00:00:00 2001
+From 376ae73167f20412dcb520b1a0528627662bfb72 Mon Sep 17 00:00:00 2001
 From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 15:42:43 +0000
 Subject: [PATCH 3/4] Filmora import: carry colour, Pan & Zoom, shadows, keys,
@@ -1933,7 +1933,7 @@ index 309d3726..2a5bb32b 100644
 2.43.0
 
 
-From 7f9246db46e5dc0a244055fab43d72ae9f00762d Mon Sep 17 00:00:00 2001
+From f3b362937d06ab2c37efa59fa860e270f24f1030 Mon Sep 17 00:00:00 2001
 From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 16:07:06 +0000
 Subject: [PATCH 4/4] Filmora Edition look: the Mint theme and the Filmora
@@ -2070,13 +2070,13 @@ index c7b473c7..19339154 100644
              Ratio(0.5),
              hsplit(
 diff --git a/crates/ui-egui/src/i18n/de.tsv b/crates/ui-egui/src/i18n/de.tsv
-index a495cf9c..300995aa 100644
+index 8d83a595..13ca8193 100644
 --- a/crates/ui-egui/src/i18n/de.tsv
 +++ b/crates/ui-egui/src/i18n/de.tsv
-@@ -3683,3 +3683,5 @@
- 	Previous	Zurück
- 	Next	Weiter
- 	Enter a valid HH:MM:SS:FF timecode	Gültigen Timecode als HH:MM:SS:FF eingeben
+@@ -3694,3 +3694,5 @@
+ 	H.264 High 10 Intra	H.264 High 10 Intra
+ 	H.264 High 10 (10-bit 4:2:0) at the sequence's size, constant quality CRF 16, AAC 320 kbps; a 10-bit master	H.264 High 10 (10 Bit 4:2:0) in der Größe der Sequenz, konstante Qualität CRF 16, AAC 320 kbps; ein 10-Bit-Master
+ 	H.264 High 10 Intra (10-bit 4:2:0, every frame a keyframe), CRF 12, AAC 320 kbps; an edit-friendly intermediate	H.264 High 10 Intra (10 Bit 4:2:0, jedes Bild ein Keyframe), CRF 12, AAC 320 kbps; ein schnittfreundliches Zwischenformat
 +	Filmora Style	Filmora-Stil
 +	Mint	Mint
 diff --git a/crates/ui-egui/src/menus.rs b/crates/ui-egui/src/menus.rs
@@ -2300,10 +2300,10 @@ index 00000000..f922f986
 +    }
 +}
 diff --git a/crates/ui-egui/tests/it/main.rs b/crates/ui-egui/tests/it/main.rs
-index cc580e7c..672dcd78 100644
+index bcf8602a..7ae128ca 100644
 --- a/crates/ui-egui/tests/it/main.rs
 +++ b/crates/ui-egui/tests/it/main.rs
-@@ -23,6 +23,7 @@ mod escape_drag_ui;
+@@ -24,6 +24,7 @@ mod escape_drag_ui;
  mod essential_sound_ui;
  mod export_menu_ui;
  mod export_ui;
