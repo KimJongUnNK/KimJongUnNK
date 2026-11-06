@@ -1,4 +1,4 @@
-From 7a4e42fb582816b438077df86b21854793ec6ae1 Mon Sep 17 00:00:00 2001
+From cfd22c094b7f7c4d9701a1acaf7b8d13e0c3bdda Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Tue, 3 Nov 2026 09:51:26 +0000
 Subject: [PATCH] German by default on German-speaking systems, and bundled
@@ -56,7 +56,7 @@ index add7d879..9138700b 100644
 +    candidates.into_iter().find(|d| d.is_dir())
  }
 diff --git a/crates/engine/src/session/query.rs b/crates/engine/src/session/query.rs
-index fbefe1c2..fabc0ada 100644
+index fdd1c503..a24a6fad 100644
 --- a/crates/engine/src/session/query.rs
 +++ b/crates/engine/src/session/query.rs
 @@ -191,6 +191,18 @@ impl Session {
@@ -79,10 +79,10 @@ index fbefe1c2..fabc0ada 100644
      pub fn units(&self) -> wordcraft_geom::Unit {
          self.prefs.units.unwrap_or_else(|| self.region().units())
 diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
-index d97948c9..d2190e37 100644
+index e13cf934..20e89038 100644
 --- a/crates/engine/src/tests.rs
 +++ b/crates/engine/src/tests.rs
-@@ -8891,6 +8891,31 @@ fn new_documents_follow_the_regions_english() {
+@@ -9223,6 +9223,31 @@ fn new_documents_follow_the_regions_english() {
      assert_eq!(s.region_english(), None);
  }
  
@@ -114,7 +114,7 @@ index d97948c9..d2190e37 100644
  /// A Spanish interface writes new documents in the region's Spanish (#3360): Uruguay's on a
  /// Uruguayan system, Mexico's on a Mexican one, Spain's elsewhere.
  #[test]
-@@ -11981,3 +12006,17 @@ fn page_down_extends_a_selection_that_ends_in_collapsed_outline_text() {
+@@ -12497,3 +12522,17 @@ fn page_down_extends_a_selection_that_ends_in_collapsed_outline_text() {
      assert!(s.sel.focus.path.0[0] > 6, "Page Down extends the selection a page on: {:?}", s.sel.focus);
      assert!(s.layout().caret(&s.sel.focus).is_some(), "to a place the outline shows");
  }
@@ -133,10 +133,10 @@ index d97948c9..d2190e37 100644
 +    }
 +}
 diff --git a/crates/ui-egui/src/app.rs b/crates/ui-egui/src/app.rs
-index cf2670e5..8bfac3f2 100644
+index 8b5addd0..0c1fbe21 100644
 --- a/crates/ui-egui/src/app.rs
 +++ b/crates/ui-egui/src/app.rs
-@@ -227,11 +227,14 @@ impl WordApp {
+@@ -241,11 +241,14 @@ impl WordApp {
          // (a Polish interface: Polish spelling, grammar and hyphenation from the first word).
          // An English interface writes the region's English (English (UK) on a British system,
          // #1045), a Spanish one the region's Spanish (Spanish (Uruguay) on a Uruguayan system,
@@ -154,13 +154,13 @@ index cf2670e5..8bfac3f2 100644
          };
          if self.applied_editing.as_ref().is_none_or(|(l, e)| *l != lang || *e != editing) {
 diff --git a/crates/ui-egui/src/app/prefs.rs b/crates/ui-egui/src/app/prefs.rs
-index 872cd051..dc9239ca 100644
+index 7f1ffb7f..06efec95 100644
 --- a/crates/ui-egui/src/app/prefs.rs
 +++ b/crates/ui-egui/src/app/prefs.rs
-@@ -63,10 +63,9 @@ impl WordApp {
-         self.session.prefs = std::mem::take(&mut self.ui.editing);
+@@ -64,10 +64,9 @@ impl WordApp {
          // Check spelling as you type follows the saved preference (#1792).
          self.session.view.proofing = self.session.prefs.check_spelling;
+         self.session.view.read_page_color = self.session.prefs.read_page_color;
 -        // The saved dictionaries folder (#1063) is searched from the start.
 -        if let Some(f) = self.session.prefs.dictionaries_folder.as_deref() {
 -            wordcraft_engine::cmd::options::use_dictionaries_folder(Some(f));
@@ -172,10 +172,10 @@ index 872cd051..dc9239ca 100644
          self.session.read_aloud.skip_citations = self.ui.read_aloud_skip_citations;
          self.session.view.dark_mode = self.ui.dark_page;
 diff --git a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
-index 30a56318..f6d60f3f 100644
+index f2708113..f29c10a4 100644
 --- a/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
 +++ b/crates/ui-egui/src/dialogs/dialogs_layout/text.rs
-@@ -255,7 +255,7 @@ pub(super) fn manual_ui(app: &mut WordApp, ui: &mut Ui, f: &mut ManualForm) -> b
+@@ -272,7 +272,7 @@ pub(super) fn manual_ui(app: &mut WordApp, ui: &mut Ui, f: &mut ManualForm) -> b
  // Language
  
  /// Proofing languages offered, by BCP 47 tag, with their English names (translated for display).
@@ -184,7 +184,7 @@ index 30a56318..f6d60f3f 100644
      ("en-US", "English (United States)"),
      ("en-GB", "English (United Kingdom)"),
      ("en-AU", "English (Australia)"),
-@@ -265,6 +265,8 @@ pub const LANGUAGES: [(&str, &str); 38] = [
+@@ -282,6 +282,8 @@ pub const LANGUAGES: [(&str, &str); 38] = [
      ("en-NZ", "English (New Zealand)"),
      ("en-ZA", "English (South Africa)"),
      ("de-DE", "German (Germany)"),
@@ -194,10 +194,10 @@ index 30a56318..f6d60f3f 100644
      ("es-ES", "Spanish (Spain)"),
      ("es-MX", "Spanish (Mexico)"),
 diff --git a/crates/ui-egui/src/i18n.rs b/crates/ui-egui/src/i18n.rs
-index 63a1c52d..f908b58a 100644
+index 9debb790..d4a2e52f 100644
 --- a/crates/ui-egui/src/i18n.rs
 +++ b/crates/ui-egui/src/i18n.rs
-@@ -99,6 +99,8 @@ pub static LANGUAGES: [LangInfo; 27] = [
+@@ -99,6 +99,8 @@ pub static LANGUAGES: [LangInfo; 28] = [
      LangInfo { code: "et", prefer_hans: false, editing_lang: None },
      // German, neutral across Germany, Austria and Switzerland; `de`, `de-DE`, `de-AT`, `de-CH` …
      // resolve here.
@@ -207,7 +207,7 @@ index 63a1c52d..f908b58a 100644
      // Russian; `ru`, `ru-RU`, `ru_RU.UTF-8` and other regions resolve here.
      LangInfo { code: "ru", prefer_hans: false, editing_lang: None },
 diff --git a/crates/ui-egui/src/options.rs b/crates/ui-egui/src/options.rs
-index 40e27376..1fe6cfce 100644
+index 85941a0c..54af40e2 100644
 --- a/crates/ui-egui/src/options.rs
 +++ b/crates/ui-egui/src/options.rs
 @@ -108,8 +108,10 @@ impl MeasureExt for egui::DragValue<'_> {
