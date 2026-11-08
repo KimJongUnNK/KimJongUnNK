@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Zentrale</title>
+  <meta name="description" content="SwitchBot-Steuerung. Einloggen, tippen, fertig.">
+  <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f2ee" media="(prefers-color-scheme: light)">
+  <meta name="color-scheme" content="dark light">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Zentrale">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <!-- Boot -->
+  <section id="boot" class="screen boot" aria-busy="true">
+    <div class="wordmark">Zentrale<span class="dot">.</span></div>
+  </section>
+
+  <!-- Login -->
+  <section id="login" class="screen login" hidden>
+    <div class="login-inner">
+      <p class="eyebrow">SwitchBot · Steuerung</p>
+      <h1 class="mega">Zen&shy;trale<span class="dot">.</span></h1>
+      <p class="lede">Einloggen. Tippen. Fertig.</p>
+      <form id="login-form" class="login-form" autocomplete="on">
+        <input type="text" name="username" value="zentrale" autocomplete="username" hidden>
+        <label class="field">
+          <span class="field-label">Passwort</span>
+          <input id="password" name="password" type="password" autocomplete="current-password" required
+                 enterkeyhint="go" placeholder="••••••••">
+        </label>
+        <button class="btn btn-accent btn-xl" type="submit" id="login-btn">
+          <span>Rein</span><span aria-hidden="true">→</span>
+        </button>
+        <p id="login-error" class="form-error" role="alert"></p>
+      </form>
+      <p id="demo-hint" class="demo-hint" hidden>Demo-Modus aktiv – Passwort: <b>demo</b></p>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <section id="main" class="screen main" hidden>
+    <header class="topbar">
+      <div class="wordmark small">Zentrale<span class="dot">.</span></div>
+      <div class="topbar-actions">
+        <span id="demo-badge" class="badge" hidden>Demo</span>
+        <button class="icon-btn" id="refresh-btn" type="button" aria-label="Aktualisieren" data-icon="refresh"></button>
+        <button class="icon-btn" id="logout-btn" type="button" aria-label="Ausloggen" data-icon="logout"></button>
+      </div>
+    </header>
+
+    <div class="hero">
+      <h1 id="greeting" class="hero-title">Hallo.</h1>
+      <p id="summary" class="hero-summary"></p>
+    </div>
+
+    <section id="scenes-wrap" class="block" hidden>
+      <h2 class="label">Szenen</h2>
+      <div id="scenes" class="scenes"></div>
+    </section>
+
+    <nav id="filters" class="filters" aria-label="Filter"></nav>
+
+    <div id="error-banner" class="banner" role="alert" hidden></div>
+
+    <div id="grid" class="grid" aria-live="polite"></div>
+
+    <p id="empty" class="empty" hidden>Keine Geräte gefunden. Ist Cloud Service in der SwitchBot-App aktiv?</p>
+
+    <footer class="foot">
+      <span id="updated"></span>
+    </footer>
+  </section>
+
+  <!-- Detail-Sheet -->
+  <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+    <div class="sheet-inner">
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <span class="sheet-icon" id="sheet-icon"></span>
+        <div class="sheet-titles">
+          <h2 id="sheet-title"></h2>
+          <p id="sheet-sub"></p>
+        </div>
+        <button class="icon-btn" id="fav-btn" type="button" aria-label="Favorit" data-icon="star"></button>
+        <button class="icon-btn" id="sheet-close" type="button" aria-label="Schließen" data-icon="close"></button>
+      </header>
+      <div id="sheet-body" class="sheet-body"></div>
+    </div>
+  </dialog>
+
+  <!-- Bestätigung -->
+  <dialog id="confirm" class="confirm">
+    <form method="dialog" class="confirm-inner">
+      <p id="confirm-text"></p>
+      <div class="confirm-actions">
+        <button class="btn" value="cancel">Abbrechen</button>
+        <button class="btn btn-danger" value="ok" id="confirm-ok">Ja</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+</body>
+</html>
