@@ -15,6 +15,7 @@ mod macos;
 mod notify;
 mod overlay;
 mod policy;
+mod updater;
 #[cfg(windows)]
 mod webview2;
 
@@ -353,6 +354,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     )?;
     let reload_look =
         MenuItem::with_id(app, "reload-look", "Design neu laden", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", updater::idle_label(), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
 
@@ -374,9 +376,13 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         &sep()?,
         &autostart,
         &settings,
+        &update,
         &sep()?,
         &quit,
     ])?;
+    if app.state::<AppState>().config.check_updates {
+        updater::check_in_background(app, update.clone());
+    }
 
     let mut tray = TrayIconBuilder::with_id(TRAY)
         .tooltip(APP_NAME)
@@ -426,6 +432,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             "reload-look" => appearance::reload(app),
+            "update" => updater::run(app, update.clone()),
             // The folder holds config.json, custom.css and mods/.
             "settings" => {
                 if let Ok(dir) = app.path().app_config_dir() {
@@ -465,6 +472,22 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 }
 
 fn main() {
+    // Diagnostics for CI and support: query the update server and exit.
+    if std::env::args().any(|arg| arg == "--update-check") {
+        match updater::latest_build() {
+            Ok(latest) => println!(
+                "build={} latest={} update_available={}",
+                updater::BUILD,
+                latest,
+                updater::is_newer(updater::BUILD, &latest)
+            ),
+            Err(err) => {
+                eprintln!("update check failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let start_hidden = std::env::args().any(|arg| arg == MINIMIZED_ARG);
 
     tauri::Builder::default()

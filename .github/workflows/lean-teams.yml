@@ -78,6 +78,10 @@ jobs:
         shell: powershell
         run: |
           $exe = Resolve-Path 'src-tauri/target/release/lean-teams.exe'
+          # Update check against the real GitHub release (tray "Update" entry).
+          $p = Start-Process -FilePath $exe -ArgumentList '--update-check' -RedirectStandardOutput update.txt -RedirectStandardError update-err.txt -Wait -PassThru
+          Get-Content update.txt, update-err.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path update.txt -Pattern "build=$env:GITHUB_SHA latest=[0-9a-f]{40} update_available=(true|false)")) { throw 'update check failed' }
           # Red accent: the taskbar icon's underline must turn red (see screenshot artifact).
           $cfg = Join-Path $env:APPDATA 'dev.leanteams.app'
           New-Item -ItemType Directory -Force -Path $cfg | Out-Null
@@ -110,6 +114,9 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Signature|Format)"
           lipo -archs "$APP/Contents/MacOS/lean-teams"
+          # Update check against the real GitHub release (menu bar "Update" entry).
+          "$APP/Contents/MacOS/lean-teams" --update-check | tee update.txt
+          grep -E "^build=$GITHUB_SHA latest=[0-9a-f]{40} update_available=(true|false)$" update.txt
           /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$APP/Contents/Info.plist" | grep -x msteams
           # Red accent: the Dock icon's underline must turn red (see screenshot artifact).
           CFG="$HOME/Library/Application Support/dev.leanteams.app"

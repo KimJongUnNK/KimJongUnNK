@@ -46,6 +46,8 @@ pub struct Config {
     pub native_notifications: bool,
     /// Closing the window hides it to the tray instead of quitting.
     pub close_to_tray: bool,
+    /// Look for a newer build on GitHub shortly after start.
+    pub check_updates: bool,
     /// Accent color, zoom, privacy blur, custom.css, always on top.
     pub overlay: OverlayConfig,
 }
@@ -61,6 +63,7 @@ impl Default for Config {
             extra_browser_args: String::new(),
             native_notifications: true,
             close_to_tray: true,
+            check_updates: true,
             overlay: OverlayConfig::default(),
         }
     }

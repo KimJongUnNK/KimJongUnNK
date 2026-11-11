@@ -4,6 +4,7 @@ Schlanker, inoffizieller Desktop-Client für Microsoft Teams: die offizielle Tea
 
 ### Neu
 
+- **Update-Button:** Tray bzw. Menüleiste → *Nach Updates suchen*. Gibt es einen neueren Build, wird er geladen und installiert, und die App startet neu. Das funktioniert ab dieser Version, ältere Builds einmal von Hand updaten.
 - **Neuer Name und neues Icon:** Die App heißt jetzt „Scheiss Teams“, das Icon zeigt „ST“. Login und Einstellungen bleiben erhalten.
 - **Icon in deiner Farbe:** Der Strich unter „ST“ übernimmt `accent_color`. Das gilt für Titelleiste, Taskleiste und Tray (Windows) sowie das Dock (macOS) und greift sofort nach *Design neu laden*.
 - **Keine lila Icons mehr:** Das Teams-Logo und App-Icons wie „Aufgaben“ oder „Class Notebook“ werden mit eingefärbt. Fotos, Emojis und bunte Fremd-Icons bleiben, wie sie sind. Abschalten: `"recolor_icons": false`.

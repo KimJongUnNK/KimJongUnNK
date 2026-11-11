@@ -20,7 +20,8 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 
 ## Features
 
-- **Tray-App:** Schließen versteckt nur. Linksklick aufs Tray-Icon zeigt oder versteckt das Fenster. Das Menü hat: Startseite, Neu laden, Cache leeren (Windows), Autostart, Einstellungen, Beenden.
+- **Tray-App:** Schließen versteckt nur. Linksklick aufs Tray-Icon zeigt oder versteckt das Fenster. Das Menü hat: Startseite, Neu laden, Cache leeren (Windows/macOS), Immer im Vordergrund, Design neu laden, Autostart, Einstellungen, Update, Beenden.
+- **Update per Klick:** Tray bzw. Menüleiste → **Nach Updates suchen**. Die App vergleicht ihren Build mit dem neuesten GitHub-Release, lädt den neuen Build, installiert ihn und startet neu. Windows: stiller Installer. macOS: tauscht die App in *Programme*. Linux: das AppImage ersetzt sich selbst, bei `.deb` öffnet sich die Release-Seite. Kurz nach dem Start schaut die App einmal selbst nach und meldet sich, wenn es was Neues gibt (`"check_updates": false` schaltet das ab). Geladen wird mit dem `curl` des Systems, die App selbst bleibt ohne HTTP-Bibliothek.
 - **Native Notifications:** Die Web-Notification-API (`new Notification`, `ServiceWorkerRegistration.showNotification`, `permissions.query`) wird auf echte OS-Notifications umgeleitet. Klick auf die Notification holt das Fenster nach vorn, und die Taskleiste blinkt, solange das Fenster nicht fokussiert ist.
 - **Ungelesen-Badge:** Wird aus dem Seitentitel `(3) Chat | Microsoft Teams` gelesen und landet in Fenstertitel, Tray-Tooltip und Taskleiste (Windows: roter Overlay-Punkt, macOS/Linux: Badge-Zahl).
 - **Links:** Links aus Chats öffnen im Standardbrowser. Microsoft-Login-Popups (SSO) bleiben in der App. `mailto:`, `tel:` und `sip:` gehen ans System. `file:`, `javascript:` und unbekannte Protokolle werden blockiert.
@@ -167,6 +168,7 @@ Beim ersten Start wird `config.json` angelegt. Tray → *Einstellungen öffnen* 
 | `extra_browser_args` | `""` | Windows: zusätzliche Chromium-Switches, wörtlich angehängt |
 | `native_notifications` | `true` | Web-Notifications auf OS-Notifications umleiten. `false` = WebView-Verhalten |
 | `close_to_tray` | `true` | `false` = Schließen beendet die App |
+| `check_updates` | `true` | Kurz nach dem Start einmal auf GitHub nach einem neueren Build schauen. Der Update-Button im Tray geht immer |
 | `overlay` | siehe oben | siehe [Design & Mods](#design--mods) |
 
 Kaputtes JSON führt nicht zum Absturz, die App startet dann mit Defaults und schreibt eine Warnung auf stderr.
