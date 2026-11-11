@@ -4,6 +4,7 @@ Schlanker, inoffizieller Desktop-Client für Microsoft Teams: die offizielle Tea
 
 ### Neu
 
+- **Aufgabe an die KI:** Zwei kleine Buttons am rechten Rand (auch im Tray). Der eine kopiert die geöffnete Aufgabe als Text, der andere als Screenshot in die Zwischenablage. Dann einfach mit Strg/⌘+V in die KI einfügen.
 - **Update-Button:** Tray bzw. Menüleiste → *Nach Updates suchen*. Gibt es einen neueren Build, wird er geladen und installiert, und die App startet neu. Das funktioniert ab dieser Version, ältere Builds einmal von Hand updaten.
 - **Neuer Name und neues Icon:** Die App heißt jetzt „Scheiss Teams“, das Icon zeigt „ST“. Login und Einstellungen bleiben erhalten.
 - **Icon in deiner Farbe:** Der Strich unter „ST“ übernimmt `accent_color`. Das gilt für Titelleiste, Taskleiste und Tray (Windows) sowie das Dock (macOS) und greift sofort nach *Design neu laden*.

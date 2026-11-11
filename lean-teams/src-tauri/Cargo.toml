@@ -21,16 +21,23 @@ serde_json = "1"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
+arboard = { version = "3", default-features = false, features = ["image-data"] }
 webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 windows-core = "0.62"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+cairo-rs = "0.18"
+webkit2gtk = "2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDate", "NSSet", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSPasteboard", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDate", "NSError", "NSSet", "NSString"] }
 png = "0.18"
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKSnapshotConfiguration", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord"] }
 
 [profile.release]
 # Size over speed: the heavy lifting happens inside the system webview anyway.

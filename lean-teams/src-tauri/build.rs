@@ -16,9 +16,13 @@ fn main() {
         .unwrap_or_else(|| "dev".into());
     println!("cargo:rustc-env=LEAN_TEAMS_BUILD={sha}");
 
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["notify", "open_link"])),
-    )
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "notify",
+            "open_link",
+            "copy_text",
+            "copy_screenshot",
+        ]),
+    ))
     .expect("failed to run tauri-build");
 }

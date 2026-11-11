@@ -13,6 +13,7 @@ pub fn apply_on_load<R: Runtime>(window: &WebviewWindow<R>) {
         let _ = window.eval(overlay::apply_script(&current.css));
     }
     let _ = window.eval(overlay::theme_script(&current.settings));
+    let _ = window.eval(overlay::copy_script(&current.settings));
     for script in &current.js {
         let _ = window.eval(script);
     }
@@ -39,6 +40,7 @@ pub fn reload<R: Runtime>(app: &AppHandle<R>) {
     };
     let _ = window.eval(overlay::apply_script(&next.css));
     let _ = window.eval(overlay::theme_script(&next.settings));
+    let _ = window.eval(overlay::copy_script(&next.settings));
     let _ = window.set_zoom(next.settings.zoom());
     let _ = window.set_always_on_top(next.settings.always_on_top);
     if js_changed {

@@ -9,6 +9,7 @@
 
 mod app_icon;
 mod appearance;
+mod clipboard;
 mod config;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -79,6 +80,20 @@ fn notify<R: Runtime>(
     if !window.is_focused().unwrap_or(false) {
         let _ = window.request_user_attention(Some(UserAttentionType::Informational));
     }
+}
+
+/// "KI-Kopie" button: the open assignment as text.
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    clipboard::set_text(&text)
+}
+
+/// "KI-Kopie" button: screenshot of the window content, all frames included.
+#[tauri::command]
+async fn copy_screenshot<R: Runtime>(webview: tauri::Webview<R>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard::copy_screenshot(&webview))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Called by the Linux link shim for `target=_blank` links.
@@ -298,6 +313,11 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
     {
         builder = builder.initialization_script(include_str!("link-shim.js"));
     }
+    // Copy-for-AI: runs in every frame, because assignments live in a
+    // cross-origin iframe.
+    builder = builder
+        .initialization_script_for_all_frames(include_str!("copy-shim.js"))
+        .initialization_script(overlay::copy_script(&overlay_settings));
     #[cfg(windows)]
     {
         builder = builder.additional_browser_args(&config.browser_args());
@@ -354,6 +374,20 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     )?;
     let reload_look =
         MenuItem::with_id(app, "reload-look", "Design neu laden", true, None::<&str>)?;
+    let copy_text = MenuItem::with_id(
+        app,
+        "copy-text",
+        "Aufgabe als Text kopieren (für KI)",
+        true,
+        None::<&str>,
+    )?;
+    let copy_shot = MenuItem::with_id(
+        app,
+        "copy-shot",
+        "Screenshot in die Zwischenablage",
+        true,
+        None::<&str>,
+    )?;
     let update = MenuItem::with_id(app, "update", updater::idle_label(), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
@@ -371,6 +405,9 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         menu.append(&clear)?;
     }
     menu.append_items(&[
+        &copy_text,
+        &copy_shot,
+        &sep()?,
         &on_top,
         &reload_look,
         &sep()?,
@@ -433,6 +470,18 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
             "reload-look" => appearance::reload(app),
             "update" => updater::run(app, update.clone()),
+            "copy-text" => {
+                show_main(app);
+                if let Some(w) = app.get_webview_window(MAIN) {
+                    let _ = w.eval("window.__leanCopy && window.__leanCopy.text()");
+                }
+            }
+            "copy-shot" => {
+                show_main(app);
+                if let Some(w) = app.get_webview_window(MAIN) {
+                    let _ = w.eval("window.__leanCopy && window.__leanCopy.shot()");
+                }
+            }
             // The folder holds config.json, custom.css and mods/.
             "settings" => {
                 if let Ok(dir) = app.path().app_config_dir() {
@@ -516,7 +565,12 @@ fn main() {
             MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_ARG]),
         ))
-        .invoke_handler(tauri::generate_handler![notify, open_link,])
+        .invoke_handler(tauri::generate_handler![
+            notify,
+            open_link,
+            copy_text,
+            copy_screenshot,
+        ])
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             let config = Config::load_or_init(&dir);

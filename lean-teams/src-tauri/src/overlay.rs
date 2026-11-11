@@ -96,6 +96,9 @@ pub struct OverlayConfig {
     /// Also recolor purple icons (Teams logo, app icons such as Assignments)
     /// with the accent color.
     pub recolor_icons: bool,
+    /// Two small buttons at the right window edge: copy the open assignment
+    /// as text or as a screenshot (for pasting into an AI chat).
+    pub copy_buttons: bool,
     /// Page zoom, 0.5 to 2.0. Ctrl/Cmd +/- works too.
     pub zoom: f64,
     /// Blur the whole window while it is not focused (screen sharing,
@@ -116,6 +119,7 @@ impl Default for OverlayConfig {
             tint: 0.0,
             border_tint: 0.0,
             recolor_icons: true,
+            copy_buttons: true,
             zoom: 1.0,
             privacy_blur: false,
             custom_css: true,
@@ -407,6 +411,14 @@ pub fn theme_script(config: &OverlayConfig) -> String {
     format!("window.__leanTheme && window.__leanTheme.set({args});")
 }
 
+/// Shows or hides the copy buttons (copy-shim.js).
+pub fn copy_script(config: &OverlayConfig) -> String {
+    format!(
+        "window.__leanCopy && window.__leanCopy.configure({{\"buttons\":{}}});",
+        config.copy_buttons
+    )
+}
+
 /// JavaScript that turns the privacy blur on or off.
 pub fn blur_script(on: bool) -> String {
     format!(
@@ -552,6 +564,19 @@ mod tests {
             ..OverlayConfig::default()
         };
         assert!(theme_script(&off).contains(r#""accent":null"#));
+    }
+
+    #[test]
+    fn copy_script_toggles_buttons() {
+        assert_eq!(
+            copy_script(&OverlayConfig::default()),
+            r#"window.__leanCopy && window.__leanCopy.configure({"buttons":true});"#
+        );
+        let off = OverlayConfig {
+            copy_buttons: false,
+            ..OverlayConfig::default()
+        };
+        assert!(copy_script(&off).ends_with(r#"configure({"buttons":false});"#));
     }
 
     #[test]

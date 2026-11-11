@@ -21,6 +21,7 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 ## Features
 
 - **Tray-App:** Schließen versteckt nur. Linksklick aufs Tray-Icon zeigt oder versteckt das Fenster. Das Menü hat: Startseite, Neu laden, Cache leeren (Windows/macOS), Immer im Vordergrund, Design neu laden, Autostart, Einstellungen, Update, Beenden.
+- **Aufgabe an die KI:** Zwei kleine Buttons am rechten Fensterrand (auch im Tray): **Text kopieren** holt die geöffnete Aufgabe als Text in die Zwischenablage. Das klappt auch aus der Aufgaben-App, die Teams in einem eigenen iframe zeigt. Markierter Text hat Vorrang. **Screenshot** kopiert das, was das Fenster zeigt, als Bild. Danach in ChatGPT, Claude & Co. mit Strg/⌘+V einfügen. Die Buttons selbst sind im Screenshot nicht zu sehen. Ausblenden mit `"copy_buttons": false`.
 - **Update per Klick:** Tray bzw. Menüleiste → **Nach Updates suchen**. Die App vergleicht ihren Build mit dem neuesten GitHub-Release, lädt den neuen Build, installiert ihn und startet neu. Windows: stiller Installer. macOS: tauscht die App in *Programme*. Linux: das AppImage ersetzt sich selbst, bei `.deb` öffnet sich die Release-Seite. Kurz nach dem Start schaut die App einmal selbst nach und meldet sich, wenn es was Neues gibt (`"check_updates": false` schaltet das ab). Geladen wird mit dem `curl` des Systems, die App selbst bleibt ohne HTTP-Bibliothek.
 - **Native Notifications:** Die Web-Notification-API (`new Notification`, `ServiceWorkerRegistration.showNotification`, `permissions.query`) wird auf echte OS-Notifications umgeleitet. Klick auf die Notification holt das Fenster nach vorn, und die Taskleiste blinkt, solange das Fenster nicht fokussiert ist.
 - **Ungelesen-Badge:** Wird aus dem Seitentitel `(3) Chat | Microsoft Teams` gelesen und landet in Fenstertitel, Tray-Tooltip und Taskleiste (Windows: roter Overlay-Punkt, macOS/Linux: Badge-Zahl).
@@ -120,6 +121,7 @@ Design in `config.json`, Beispiel:
   "border_tint": 0.0,
   "tint": 0.0,
   "recolor_icons": true,
+  "copy_buttons": true,
   "zoom": 1.0,
   "privacy_blur": false,
   "always_on_top": false,
@@ -133,6 +135,7 @@ Design in `config.json`, Beispiel:
 | `accent_color` | `"#RRGGBB"` statt Teams-Lila, `null` = Standard. Färbt **die ganze Seite** um, Farbwechsel werden weich überblendet. Auch der Strich unter „ST“ im App-Icon nimmt die Farbe an: Titelleiste, Taskleiste und Tray (Windows/Linux), Dock (macOS). Das Icon im Startmenü bzw. Finder bleibt lime |
 | `border_tint` | 0–1: Rahmen, Trennlinien und Umrandungen Richtung Akzentfarbe. Hintergründe und Text bleiben, wie sie sind |
 | `tint` | 0–0.4: ein Hauch Akzentfarbe auf Flächen, getrennt von den Rändern. Text wird nie eingefärbt |
+| `copy_buttons` | Die zwei Kopier-Buttons am rechten Rand anzeigen (Standard `true`). Im Tray gibt es die Funktionen immer |
 | `recolor_icons` | Lila Icons gleich mitfärben: Teams-Logo, App-Icons wie Aufgaben oder Class Notebook (Standard `true`) |
 | `zoom` | 0.5–2, alternativ Strg/⌘ + Plus/Minus |
 | `privacy_blur` | Teams wird unscharf, sobald du das Fenster verlässt |
@@ -192,10 +195,12 @@ Das Skript summiert RAM über den **ganzen Prozessbaum** (Host + alle `msedgeweb
 
 ## Sicherheit
 
-Die Teams-Seite ist Remote-Content. Sie bekommt genau **zwei** IPC-Befehle, und zwar nur von den Origins in [`capabilities/teams.json`](src-tauri/capabilities/teams.json) (`teams.microsoft.com`, `teams.cloud.microsoft`, `teams.live.com`):
+Die Teams-Seite ist Remote-Content. Sie bekommt genau **vier** IPC-Befehle, und zwar nur von den Origins in [`capabilities/teams.json`](src-tauri/capabilities/teams.json) (`teams.microsoft.com`, `teams.cloud.microsoft`, `teams.live.com`):
 
 - `notify(title, body)`: zeigt eine Notification an (Titel auf 120, Text auf 400 Zeichen gekürzt).
 - `open_link(url)`: öffnet einen Link im Standardbrowser, nur `http(s)`, `mailto`, `tel` und `sip`. Wird nur vom Linux-Link-Shim genutzt.
+- `copy_text(text)`: schreibt Text in die Zwischenablage (Kopier-Button).
+- `copy_screenshot()`: schreibt einen Screenshot des Fensterinhalts in die Zwischenablage (Kopier-Button).
 
 Alle anderen Origins, also SSO-Provider und beliebige Seiten nach einem Redirect, werden von der ACL abgewiesen (getestet: `Command notify not allowed by ACL`). Plugin-Befehle (Opener, Autostart, Fensterstatus) sind für die Seite nicht freigegeben.
 
