@@ -157,6 +157,10 @@ jobs:
       run:
         working-directory: .
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: lean-teams/RELEASE_NOTES.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -175,12 +179,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          { cat lean-teams/RELEASE_NOTES.md; echo; echo "_Build ${GITHUB_SHA::7}_"; } > notes.md
           gh release delete lean-teams-latest --cleanup-tag --yes || true
           gh release create lean-teams-latest dist/* \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Scheiss Teams (latest build)" \
-            --notes "Automatic build of ${GITHUB_SHA::7}. Unsigned: on macOS run scripts/install-macos.sh, on Windows choose 'More info → Run anyway' in SmartScreen."
+            --notes-file notes.md
 
   # End-to-end check of the one-line macOS install against the release above.
   verify-macos-install:
