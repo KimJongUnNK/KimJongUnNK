@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lean Teams",
+  "productName": "Scheiss Teams",
   "mainBinaryName": "lean-teams",
   "version": "0.1.0",
   "identifier": "dev.leanteams.app",

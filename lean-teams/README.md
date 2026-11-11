@@ -1,4 +1,6 @@
-# Lean Teams
+# Lean Teams („Scheiss Teams“)
+
+Die App heißt auf dem Rechner **Scheiss Teams** (Icon „ST“). Das Projekt, die Release-Dateien und die Einstellungsordner (`dev.leanteams.app`) heißen weiter Lean Teams, Login und Einstellungen bleiben also beim Umbenennen erhalten.
 
 Ein schlanker, inoffizieller Desktop-Client für Microsoft Teams. Er ist ein nativer Rust-Host (Tauri 2), der die **offizielle Teams-Web-App** in der WebView des Betriebssystems lädt. Es gibt kein mitgeliefertes Chromium, keine Hintergrunddienste und keine Add-ins.
 
@@ -31,7 +33,7 @@ Weil die eigentliche App gar nicht in der `.exe` steckt. Teams 2.x ist ein dünn
 
 Fertige Installer baut die GitHub Action [`.github/workflows/lean-teams.yml`](../.github/workflows/lean-teams.yml) bei jedem Push. Sie veröffentlicht sie als Release [`lean-teams-latest`](https://github.com/KimJongUnNK/KimJongUnNK/releases/tag/lean-teams-latest), also mit festen Links und ohne GitHub-Login:
 
-- **Windows:** `Lean Teams_x.y.z_x64-setup.exe` (NSIS, ohne Admin) oder `.msi`. Die WebView2-Runtime ist auf Win 10/11 vorinstalliert, fehlt sie, lädt der Installer sie nach.
+- **Windows:** `LeanTeams-Windows-x64-setup.exe` (NSIS, ohne Admin) oder `.msi`. Wer noch die alte „Lean Teams“ installiert hat: erst unter *Einstellungen → Apps* deinstallieren, sonst liegen beide nebeneinander. Die WebView2-Runtime ist auf Win 10/11 vorinstalliert, fehlt sie, lädt der Installer sie nach.
 - **macOS:** `.dmg` (Universal: Apple Silicon + Intel). Details im Abschnitt [macOS](#macos).
 - **Linux:** `.deb` (2,5 MB, nutzt System-WebKitGTK) oder `.AppImage` (78 MB, bringt WebKitGTK mit).
 
@@ -65,11 +67,11 @@ curl -fsSL https://raw.githubusercontent.com/KimJongUnNK/KimJongUnNK/claude/nift
 Von Hand:
 
 1. `LeanTeams-macOS-universal.dmg` aus dem Release [`lean-teams-latest`](https://github.com/KimJongUnNK/KimJongUnNK/releases/tag/lean-teams-latest) laden und öffnen.
-2. `Lean Teams.app` nach *Programme* ziehen.
+2. `Scheiss Teams.app` nach *Programme* ziehen (eine alte `Lean Teams.app` löschen).
 3. Die App ist nur ad-hoc signiert, nicht von Apple notarisiert. Gatekeeper blockt deshalb den ersten Start. Seit macOS 15 gibt es dafür kein Rechtsklick → Öffnen mehr. Entweder *Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“* klicken, oder einmal im Terminal:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Lean Teams.app"
+xattr -dr com.apple.quarantine "/Applications/Scheiss Teams.app"
 ```
 
 4. Beim ersten Anruf fragt macOS nach Kamera- und Mikrofonzugriff, einmal erlauben.
@@ -116,6 +118,7 @@ Design in `config.json`, Beispiel:
   "accent_color": "#c4ff00",
   "border_tint": 0.0,
   "tint": 0.0,
+  "recolor_icons": true,
   "zoom": 1.0,
   "privacy_blur": false,
   "always_on_top": false,
@@ -126,15 +129,18 @@ Design in `config.json`, Beispiel:
 
 | Feld | Wirkung |
 |---|---|
-| `accent_color` | `"#RRGGBB"` statt Teams-Lila, `null` = Standard. Färbt **die ganze Seite** um, Farbwechsel werden weich überblendet |
+| `accent_color` | `"#RRGGBB"` statt Teams-Lila, `null` = Standard. Färbt **die ganze Seite** um, Farbwechsel werden weich überblendet. Auch der Strich unter „ST“ im App-Icon nimmt die Farbe an: Titelleiste, Taskleiste und Tray (Windows/Linux), Dock (macOS). Das Icon im Startmenü bzw. Finder bleibt lime |
 | `border_tint` | 0–1: Rahmen, Trennlinien und Umrandungen Richtung Akzentfarbe. Hintergründe und Text bleiben, wie sie sind |
 | `tint` | 0–0.4: ein Hauch Akzentfarbe auf Flächen, getrennt von den Rändern. Text wird nie eingefärbt |
+| `recolor_icons` | Lila Icons gleich mitfärben: Teams-Logo, App-Icons wie Aufgaben oder Class Notebook (Standard `true`) |
 | `zoom` | 0.5–2, alternativ Strg/⌘ + Plus/Minus |
 | `privacy_blur` | Teams wird unscharf, sobald du das Fenster verlässt |
 | `always_on_top` | Fenster über allen anderen, auch im Tray umschaltbar |
 | `custom_css` / `mods` | `custom.css` bzw. den `mods`-Ordner anwenden |
 
 **Wie die Akzentfarbe die ganze Seite erwischt:** Die Recolor-Engine (`theme.js`) kennt keine Teams-Klassennamen. Sie durchsucht alle Stylesheets, auch die, die Teams während der Laufzeit befüllt, nach Farbvariablen und Farbwerten im Teams-Lila. Diese gibt sie in deinem Farbton aus, mit derselben Helligkeit und Transparenz, also passend für Hell- und Dunkelmodus. Andere Farben (Rot für Fehler, Grün für „verfügbar“) bleiben unangetastet, deshalb übersteht das Teams-Updates. Den teuren Scan macht sie nur, wenn Teams neue Styles hinzufügt. Ohne `accent_color` arbeitet sie gar nicht.
+
+**Icons:** Logo und App-Icons sind Bilder, keine CSS-Farben. Lean Teams liest dafür die Pixel jedes kleinen Bildes (bis 160 px) einmal aus. Ist es überwiegend Teams-Lila und kaum anders farbig, bekommt es einen Duotone-Filter: Schwarz bleibt schwarz, Weiß bleibt weiß, das Lila wird zur Akzentfarbe. Fotos, Emojis, GIFs und bunte Fremd-App-Icons bleiben unangetastet. Inline-SVGs werden direkt umgefärbt. Bilder, die als CSS-Hintergrund geladen werden, erfasst das nicht.
 
 **Selbst modden:**
 - **Selektoren finden:** Teams im normalen Browser öffnen (teams.microsoft.com), Rechtsklick → *Untersuchen*. Nimm `[data-tid="…"]`-Attribute, die generierten Klassennamen von Teams ändern sich mit jedem Update.

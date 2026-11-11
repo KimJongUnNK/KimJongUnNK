@@ -17,7 +17,7 @@ pub const MODS_DIR: &str = "mods";
 const MAX_MOD_BYTES: u64 = 1024 * 1024;
 
 /// Written on first run so the user has a starting point.
-const CSS_TEMPLATE: &str = r#"/* Lean Teams - eigenes CSS
+const CSS_TEMPLATE: &str = r#"/* Scheiss Teams - eigenes CSS
  *
  * Wird über Teams gelegt. Ändern, speichern, dann im Tray-Menü
  * "Design neu laden" - kein Neustart nötig.
@@ -44,7 +44,7 @@ body, button, input, textarea { font-family: "Inter", system-ui, sans-serif !imp
 
 /// Files written into a new mods folder. The underscore keeps the examples
 /// switched off until the user renames them.
-const MODS_README: &str = r#"Lean Teams - Mods
+const MODS_README: &str = r#"Scheiss Teams - Mods
 ==================
 
 Jede .css- und .js-Datei in diesem Ordner wird in Teams geladen,
@@ -78,7 +78,7 @@ const EXAMPLE_CSS: &str = r#"/* Beispiel-Mod: kompakter Modus.
 const EXAMPLE_JS: &str = r#"// Beispiel-Mod: zeigt die Uhrzeit des letzten Ladens im Fenstertitel-Tooltip
 // der Seite und loggt in die Konsole. Zum Aktivieren den Unterstrich vorne
 // aus dem Dateinamen entfernen.
-console.log("[Lean Teams] Beispiel-Mod geladen um", new Date().toLocaleTimeString());
+console.log("[Scheiss Teams] Beispiel-Mod geladen um", new Date().toLocaleTimeString());
 document.documentElement.setAttribute("data-lean-mod-loaded", new Date().toISOString());
 "#;
 
@@ -93,6 +93,9 @@ pub struct OverlayConfig {
     /// How much neutral borders and dividers are tinted toward the accent,
     /// 0.0 (grey) to 1.0 (accent color).
     pub border_tint: f64,
+    /// Also recolor purple icons (Teams logo, app icons such as Assignments)
+    /// with the accent color.
+    pub recolor_icons: bool,
     /// Page zoom, 0.5 to 2.0. Ctrl/Cmd +/- works too.
     pub zoom: f64,
     /// Blur the whole window while it is not focused (screen sharing,
@@ -112,6 +115,7 @@ impl Default for OverlayConfig {
             accent_color: None,
             tint: 0.0,
             border_tint: 0.0,
+            recolor_icons: true,
             zoom: 1.0,
             privacy_blur: false,
             custom_css: true,
@@ -336,7 +340,7 @@ pub fn mod_scripts(config: &OverlayConfig, mods: &[Mod]) -> Vec<String> {
         .map(|m| {
             let name = serde_json::to_string(&m.name).expect("strings always serialize");
             format!(
-                "if (window.top === window) {{ var __lm = window.__leanMods || (window.__leanMods = {{}}); if (!__lm[{name}]) {{ __lm[{name}] = true; try {{ (function () {{\n{code}\n}})(); }} catch (e) {{ console.error(\"[Lean Teams] Mod \" + {name} + \" failed:\", e); }} }} }}",
+                "if (window.top === window) {{ var __lm = window.__leanMods || (window.__leanMods = {{}}); if (!__lm[{name}]) {{ __lm[{name}] = true; try {{ (function () {{\n{code}\n}})(); }} catch (e) {{ console.error(\"[Scheiss Teams] Mod \" + {name} + \" failed:\", e); }} }} }}",
                 code = m.code
             )
         })
@@ -398,6 +402,7 @@ pub fn theme_script(config: &OverlayConfig) -> String {
         "accent": config.accent(),
         "tint": config.tint(),
         "borderTint": config.border_tint(),
+        "icons": config.recolor_icons,
     });
     format!("window.__leanTheme && window.__leanTheme.set({args});")
 }
@@ -540,7 +545,7 @@ mod tests {
         };
         assert_eq!(
             theme_script(&config),
-            r##"window.__leanTheme && window.__leanTheme.set({"accent":"#aabbcc","borderTint":1.0,"tint":0.4});"##
+            r##"window.__leanTheme && window.__leanTheme.set({"accent":"#aabbcc","borderTint":1.0,"icons":true,"tint":0.4});"##
         );
         let off = OverlayConfig {
             accent_color: Some("red".into()),

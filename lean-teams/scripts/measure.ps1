@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Compares RAM and disk usage of the official Microsoft Teams client and Lean Teams.
+    Compares RAM and disk usage of the official Microsoft Teams client and Scheiss Teams (Lean Teams).
 
 .DESCRIPTION
     RAM: sums the whole process tree of each app (the host exe plus every
@@ -84,7 +84,7 @@ function Format-MB {
 
 $apps = @(
     [pscustomobject]@{ Name = 'Microsoft Teams'; Exe = 'ms-teams.exe' },
-    [pscustomobject]@{ Name = 'Lean Teams'; Exe = 'lean-teams.exe' }
+    [pscustomobject]@{ Name = 'Scheiss Teams'; Exe = 'lean-teams.exe' }
 )
 
 # --- RAM -------------------------------------------------------------------
@@ -108,6 +108,10 @@ $teamsData = Join-Path $env:LOCALAPPDATA 'Packages\MSTeams_8wekyb3d8bbwe'
 
 if (-not $LeanInstallDir) {
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Scheiss Teams'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Scheiss Teams'),
+        (Join-Path $env:ProgramFiles 'Scheiss Teams'),
+        # Its earlier name.
         (Join-Path $env:LOCALAPPDATA 'Lean Teams'),
         (Join-Path $env:LOCALAPPDATA 'Programs\Lean Teams'),
         (Join-Path $env:ProgramFiles 'Lean Teams')
@@ -124,7 +128,7 @@ $disk = @{
         Install = Get-FolderBytes -Paths @($teamsInstall)
         Data    = Get-FolderBytes -Paths @($teamsData)
     }
-    'Lean Teams'      = [pscustomobject]@{
+    'Scheiss Teams'   = [pscustomobject]@{
         Install = Get-FolderBytes -Paths @($LeanInstallDir)
         Data    = Get-FolderBytes -Paths $leanData
     }
@@ -157,12 +161,12 @@ $rows | Select-Object App, Running, Processes, 'Working set', Private, Install, 
     Format-Table -AutoSize
 
 $official = $rows | Where-Object App -eq 'Microsoft Teams'
-$lean = $rows | Where-Object App -eq 'Lean Teams'
+$lean = $rows | Where-Object App -eq 'Scheiss Teams'
 if ($official._ws -gt 0 -and $lean._ws -gt 0) {
-    Write-Host ('RAM (working set): Lean Teams uses {0:P0} of Microsoft Teams' -f ($lean._ws / $official._ws))
+    Write-Host ('RAM (working set): Scheiss Teams uses {0:P0} of Microsoft Teams' -f ($lean._ws / $official._ws))
 }
 if ($official._disk -gt 0 -and $lean._disk -gt 0) {
-    Write-Host ('Disk: Lean Teams uses {0:P0} of Microsoft Teams' -f ($lean._disk / $official._disk))
+    Write-Host ('Disk: Scheiss Teams uses {0:P0} of Microsoft Teams' -f ($lean._disk / $official._disk))
 }
 foreach ($row in $rows | Where-Object { -not $_.Running }) {
     Write-Host "$($row.App) is not running - start it to include its RAM usage." -ForegroundColor Yellow

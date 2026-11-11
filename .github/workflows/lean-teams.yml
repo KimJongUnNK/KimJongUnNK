@@ -78,34 +78,58 @@ jobs:
         shell: powershell
         run: |
           $exe = Resolve-Path 'src-tauri/target/release/lean-teams.exe'
+          # Red accent: the taskbar icon's underline must turn red (see screenshot artifact).
+          $cfg = Join-Path $env:APPDATA 'dev.leanteams.app'
+          New-Item -ItemType Directory -Force -Path $cfg | Out-Null
+          Set-Content -Path (Join-Path $cfg 'config.json') -Value '{ "overlay": { "accent_color": "#ff2020" } }'
           $proc = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 25
+          New-Item -ItemType Directory -Force -Path screenshots | Out-Null
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$PWD/screenshots/windows.png")
+          } catch { Write-Host "screenshot failed: $_" }
           if ($proc.HasExited) { throw "lean-teams.exe exited early with code $($proc.ExitCode)" }
           Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'lean-teams.exe', 'msedgewebview2.exe' } |
             Select-Object ProcessId, ParentProcessId, Name | Format-Table -AutoSize
           # Windows PowerShell 5.1 (what most users run) and PowerShell 7.
           $out51 = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
           $out51
-          if ($LASTEXITCODE -ne 0 -or $out51 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under Windows PowerShell 5.1' }
+          if ($LASTEXITCODE -ne 0 -or $out51 -notmatch 'Scheiss Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under Windows PowerShell 5.1' }
           $out7 = pwsh -NoProfile -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
           $out7
-          if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Lean Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
+          if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Scheiss Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
           Stop-Process -Id $proc.Id -Force
       - name: macOS smoke test (signature, launch, measure script)
         if: runner.os == 'macOS'
         run: |
-          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Lean Teams.app"
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Scheiss Teams.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Signature|Format)"
           lipo -archs "$APP/Contents/MacOS/lean-teams"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$APP/Contents/Info.plist" | grep -x msteams
+          # Red accent: the Dock icon's underline must turn red (see screenshot artifact).
+          CFG="$HOME/Library/Application Support/dev.leanteams.app"
+          mkdir -p "$CFG"
+          echo '{ "overlay": { "accent_color": "#ff2020" } }' > "$CFG/config.json"
           open "$APP"
-          for i in $(seq 1 30); do pgrep -f "Lean Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          for i in $(seq 1 30); do pgrep -f "Scheiss Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
           sleep 20
+          mkdir -p screenshots && screencapture -x screenshots/macos.png || true
           ps -axo pid,ppid,rss,command | grep -E "lean-teams|com\.apple\.WebKit" | grep -v grep || true
           for p in $(pgrep -f "com.apple.WebKit"); do sudo launchctl procinfo "$p" 2>/dev/null | grep -i "responsible" || true; done
           sudo SAMPLES=2 INTERVAL=1 bash scripts/measure-macos.sh | tee measure.txt
-          grep -E "^Lean Teams +yes" measure.txt
-          pkill -f "Lean Teams.app/Contents/MacOS/lean-teams" || true
+          grep -E "^Scheiss Teams +yes" measure.txt
+          pkill -f "Scheiss Teams.app/Contents/MacOS/lean-teams" || true
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Linux'
+        with:
+          name: screenshot-${{ runner.os }}
+          path: lean-teams/screenshots/
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: lean-teams-${{ runner.os }}
@@ -155,7 +179,7 @@ jobs:
           gh release create lean-teams-latest dist/* \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Lean Teams (latest build)" \
+            --title "Scheiss Teams (latest build)" \
             --notes "Automatic build of ${GITHUB_SHA::7}. Unsigned: on macOS run scripts/install-macos.sh, on Windows choose 'More info → Run anyway' in SmartScreen."
 
   # End-to-end check of the one-line macOS install against the release above.
@@ -170,7 +194,7 @@ jobs:
       - name: Install via scripts/install-macos.sh and launch
         run: |
           bash lean-teams/scripts/install-macos.sh
-          for i in $(seq 1 30); do pgrep -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
-          pgrep -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams"
-          codesign --verify --deep --strict "/Applications/Lean Teams.app"
-          pkill -f "/Applications/Lean Teams.app/Contents/MacOS/lean-teams" || true
+          for i in $(seq 1 30); do pgrep -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          pgrep -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams"
+          codesign --verify --deep --strict "/Applications/Scheiss Teams.app"
+          pkill -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams" || true

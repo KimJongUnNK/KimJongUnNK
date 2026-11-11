@@ -2,7 +2,7 @@
 //! Teams page: accent color (theme.js), stylesheet, JS mods, zoom and
 //! always-on-top. Everything is file-based; there is no extra window.
 
-use crate::{config::Config, overlay, AppState, MAIN};
+use crate::{app_icon, config::Config, overlay, AppState, MAIN};
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 /// Applies stylesheet, theme and JS mods to a page that just finished
@@ -33,6 +33,7 @@ pub fn reload<R: Runtime>(app: &AppHandle<R>) {
         *current = next.clone();
         changed
     };
+    app_icon::apply(app, next.settings.accent().as_deref());
     let Some(window) = app.get_webview_window(MAIN) else {
         return;
     };

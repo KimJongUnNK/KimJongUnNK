@@ -7,6 +7,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_icon;
 mod appearance;
 mod config;
 #[cfg(target_os = "macos")]
@@ -34,8 +35,8 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_opener::OpenerExt;
 
 pub(crate) const MAIN: &str = "main";
-const TRAY: &str = "tray";
-pub(crate) const APP_NAME: &str = "Lean Teams";
+pub(crate) const TRAY: &str = "tray";
+pub(crate) const APP_NAME: &str = "Scheiss Teams";
 const NOTIFICATION_SHIM: &str = include_str!("notification-shim.js");
 const MINIMIZED_ARG: &str = "--minimized";
 
@@ -504,6 +505,8 @@ fn main() {
             build_tray(app.handle())?;
             let pending = PENDING_LINK.lock().unwrap().take();
             build_main_window(app.handle(), start_hidden && pending.is_none())?;
+            let accent = app.state::<AppState>().config.overlay.accent();
+            app_icon::apply(app.handle(), accent.as_deref());
             if let Some(target) = pending {
                 *LAST_REDIRECT.lock().unwrap() = None;
                 open_in_main(app.handle(), target);
@@ -546,7 +549,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("failed to start Lean Teams")
+        .expect("failed to start Scheiss Teams")
         .run(|app, event| match event {
             // Keep running in the tray when the last window is hidden.
             tauri::RunEvent::ExitRequested {

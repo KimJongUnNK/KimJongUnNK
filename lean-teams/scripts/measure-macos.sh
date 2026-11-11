@@ -56,9 +56,10 @@ case "${1:-teams}" in
         ;;
     teams)
         OFFICIAL_LABEL="Microsoft Teams"
-        LEAN_LABEL="Lean Teams"
+        LEAN_LABEL="Scheiss Teams"
         OFFICIAL_APP="/Applications/Microsoft Teams.app"
-        LEAN_APP="/Applications/Lean Teams.app"
+        LEAN_APP="/Applications/Scheiss Teams.app"
+        [ -d "$LEAN_APP" ] || LEAN_APP="/Applications/Lean Teams.app" # old name
         OFFICIAL_DATA=(
             "$USER_HOME/Library/Containers/com.microsoft.teams2"
             "$USER_HOME/Library/Group Containers/UBF8T346G9.com.microsoft.teams"
@@ -75,7 +76,7 @@ case "${1:-teams}" in
         ;;
 esac
 TEAMS_PATTERN=${TEAMS_PATTERN:-"/Microsoft Teams.app/Contents/MacOS/"}
-LEAN_PATTERN=${LEAN_PATTERN:-"/Lean Teams.app/Contents/MacOS/lean-teams"}
+LEAN_PATTERN=${LEAN_PATTERN:-" Teams.app/Contents/MacOS/lean-teams"}
 
 # PIDs whose executable path contains $1 (fixed string). Processes that only
 # carry it as an argument (this script's own awk, shells, `open`) are skipped:
