@@ -4,6 +4,7 @@ Schlanker, inoffizieller Desktop-Client für Microsoft Teams: die offizielle Tea
 
 ### Neu
 
+- **macOS: Aufgaben fragen nicht mehr jedes Mal nach Berechtigungen.** Eingebettete Teams-Apps dürfen jetzt ihre Anmeldung behalten.
 - **Aufgabe an die KI:** Zwei kleine Buttons am rechten Rand (auch im Tray). Der eine kopiert die geöffnete Aufgabe als Text, der andere als Screenshot in die Zwischenablage. Dann einfach mit Strg/⌘+V in die KI einfügen.
 - **Update-Button:** Tray bzw. Menüleiste → *Nach Updates suchen*. Gibt es einen neueren Build, wird er geladen und installiert, und die App startet neu. Das funktioniert ab dieser Version, ältere Builds einmal von Hand updaten.
 - **Neuer Name und neues Icon:** Die App heißt jetzt „Scheiss Teams“, das Icon zeigt „ST“. Login und Einstellungen bleiben erhalten.

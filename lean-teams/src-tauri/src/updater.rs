@@ -34,7 +34,6 @@ fn release_api() -> String {
     format!("https://api.github.com/repos/{REPO}/releases/tags/{TAG}")
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn asset_url(name: &str) -> String {
     format!("https://github.com/{REPO}/releases/download/{TAG}/{name}")
 }
@@ -61,19 +60,46 @@ fn curl() -> Command {
     quiet(if cfg!(windows) { "curl.exe" } else { "curl" })
 }
 
-/// The commit the rolling release was built from.
-pub fn latest_build() -> Result<String, String> {
-    let out = curl()
-        .args(["-fsSL", "-m", "20", "-A", "lean-teams-updater"])
-        .args(["-H", "Accept: application/vnd.github+json"])
-        .arg(release_api())
+fn fetch(url: &str, extra_headers: &[String]) -> Result<String, String> {
+    let mut cmd = curl();
+    cmd.args(["-fsSL", "-m", "20", "-A", "lean-teams-updater"]);
+    for header in extra_headers {
+        cmd.args(["-H", header]);
+    }
+    let out = cmd
+        .arg(url)
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("curl nicht gefunden ({e})"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
-    release_commit(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn is_commit(text: &str) -> bool {
+    text.len() == 40 && text.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The commit the rolling release was built from. Reads `build.txt` from
+/// the release downloads (GitHub's CDN, no rate limit); falls back to the
+/// REST API, which allows 60 anonymous requests per hour and IP.
+pub fn latest_build() -> Result<String, String> {
+    if let Ok(text) = fetch(&asset_url("build.txt"), &[]) {
+        let sha = text.trim();
+        if is_commit(sha) {
+            return Ok(sha.to_ascii_lowercase());
+        }
+    }
+    let mut headers = vec!["Accept: application/vnd.github+json".to_string()];
+    // CI passes its token; regular users have none and do not need one.
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if !token.trim().is_empty() {
+            headers.push(format!("Authorization: Bearer {}", token.trim()));
+        }
+    }
+    release_commit(&fetch(&release_api(), &headers)?)
 }
 
 fn release_commit(json: &str) -> Result<String, String> {
@@ -311,6 +337,16 @@ mod tests {
         assert_eq!(release_commit(json).unwrap(), "abc123");
         assert!(release_commit(r#"{"target_commitish":""}"#).is_err());
         assert!(release_commit("<html>rate limited</html>").is_err());
+    }
+
+    #[test]
+    fn build_txt_must_be_a_full_commit() {
+        assert!(is_commit("f3b674702d88fb17c63c5cc6cacd15c8ed8d6b6e"));
+        assert!(!is_commit("f3b6747"));
+        assert!(!is_commit(
+            "<!DOCTYPE html><html>not found</html>.............."
+        ));
+        assert!(!is_commit(""));
     }
 
     #[test]

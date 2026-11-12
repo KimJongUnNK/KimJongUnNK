@@ -324,6 +324,8 @@ fn build_main_window<R: Runtime>(app: &AppHandle<R>, start_hidden: bool) -> taur
     }
 
     let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    macos::allow_cross_site_sign_in(window.as_ref());
     #[cfg(windows)]
     {
         let link_app = app.clone();

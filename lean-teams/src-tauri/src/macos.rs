@@ -67,3 +67,34 @@ fn encode_png(icon: &tauri::image::Image<'_>) -> Option<Vec<u8>> {
     }
     Some(out)
 }
+
+/// Lets the embedded Teams apps (Assignments, OneNote, Forms, …) keep their
+/// sign-in. They run in cross-site iframes, and WebKit's tracking prevention
+/// (ITP, "Prevent cross-site tracking" in Safari) blocks their cookies, so
+/// Assignments asks for its permissions again on every start. Microsoft's
+/// advice for Teams in Safari is to turn that off; WKWebView only offers it
+/// as SPI, so each call is guarded and simply skipped where unavailable.
+pub fn allow_cross_site_sign_in<R: Runtime>(webview: &Webview<R>) {
+    use objc2::{msg_send, sel};
+    use objc2_foundation::NSObjectProtocol;
+    let _ = webview.with_webview(|platform| unsafe {
+        let view = &*platform.inner().cast::<WKWebView>();
+        let store = view.configuration().websiteDataStore();
+        if store.respondsToSelector(sel!(_setResourceLoadStatisticsEnabled:)) {
+            let _: () = msg_send![&*store, _setResourceLoadStatisticsEnabled: false];
+            eprintln!("lean-teams: tracking prevention off");
+        }
+        let block_mode =
+            sel!(_setThirdPartyCookieBlockingMode:onlyOnSitesWithoutUserInteraction:completionHandler:);
+        if store.respondsToSelector(block_mode) {
+            let done = RcBlock::new(|| {});
+            let _: () = msg_send![
+                &*store,
+                _setThirdPartyCookieBlockingMode: false,
+                onlyOnSitesWithoutUserInteraction: false,
+                completionHandler: &*done
+            ];
+            eprintln!("lean-teams: third-party cookie blocking off");
+        }
+    });
+}

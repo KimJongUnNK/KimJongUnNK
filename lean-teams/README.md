@@ -87,6 +87,7 @@ xattr -dr com.apple.quarantine "/Applications/Scheiss Teams.app"
 - **Cache leeren** (Menüleiste): Löscht Disk-, Memory-, Fetch- und App-Cache von WebKit. Cookies, Local Storage und IndexedDB bleiben, du bleibst also eingeloggt.
 - **Notifications:** Kommen als macOS-Mitteilungen von „Lean Teams“. Ein Klick holt das Fenster nach vorn.
 - **Nicht auf dem Mac:** `low_memory_when_hidden`, `disk_cache_mb`, `renderer_process_limit` und `extra_browser_args` sind WebView2-Schalter und werden ignoriert. WKWebView hat dafür keine öffentliche API. macOS komprimiert und lagert den Speicher von Hintergrund-Apps aber ohnehin selbst aus.
+- **Eingebettete Teams-Apps (Aufgaben, OneNote, Forms):** Die laufen in fremden iframes. WebKit blockiert dort standardmäßig Cookies („Websiteübergreifendes Tracking verhindern“), und die Aufgaben-App fragt dann bei jedem Start erneut nach Berechtigungen. Scheiss Teams schaltet diese Sperre für sein eigenes Fenster ab, wie Microsoft es für Teams in Safari empfiehlt. Safari selbst bleibt unberührt.
 - **Calls:** Es gilt der Safari-Support von Teams. Chat, Kanäle, Dateien, Audio und Video laufen. Bei Screen-Sharing und Hintergrundeffekten ist Teams auf Safari eingeschränkter als auf Chromium.
 
 ### Messen
