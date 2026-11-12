@@ -1,0 +1,221 @@
+name: Lean Teams
+
+on:
+  push:
+    paths: ["lean-teams/**", ".github/workflows/lean-teams.yml"]
+  pull_request:
+    paths: ["lean-teams/**", ".github/workflows/lean-teams.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: lean-teams
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lean-teams/src-tauri
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - run: cargo fmt --check
+        working-directory: lean-teams/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: lean-teams/src-tauri
+      - run: cargo test
+        working-directory: lean-teams/src-tauri
+      - name: Check measure-macos.sh syntax
+        run: bash -n scripts/measure-macos.sh
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ""
+          - os: macos-latest
+            args: "--target universal-apple-darwin"
+          - os: ubuntu-24.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lean-teams/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - name: Check measure.ps1 syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/measure.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }
+      - name: Build
+        run: npx --yes @tauri-apps/cli@2.12.4 build ${{ matrix.args }}
+      - name: Windows smoke test (launch, measure script)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Resolve-Path 'src-tauri/target/release/lean-teams.exe'
+          # Update check against the real GitHub release (tray "Update" entry).
+          $p = Start-Process -FilePath $exe -ArgumentList '--update-check' -RedirectStandardOutput update.txt -RedirectStandardError update-err.txt -Wait -PassThru
+          Get-Content update.txt, update-err.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path update.txt -Pattern "build=$env:GITHUB_SHA latest=[0-9a-f]{40} update_available=(true|false)")) { throw 'update check failed' }
+          # Red accent: the taskbar icon's underline must turn red (see screenshot artifact).
+          $cfg = Join-Path $env:APPDATA 'dev.leanteams.app'
+          New-Item -ItemType Directory -Force -Path $cfg | Out-Null
+          Set-Content -Path (Join-Path $cfg 'config.json') -Value '{ "overlay": { "accent_color": "#ff2020" } }'
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          New-Item -ItemType Directory -Force -Path screenshots | Out-Null
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$PWD/screenshots/windows.png")
+          } catch { Write-Host "screenshot failed: $_" }
+          if ($proc.HasExited) { throw "lean-teams.exe exited early with code $($proc.ExitCode)" }
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'lean-teams.exe', 'msedgewebview2.exe' } |
+            Select-Object ProcessId, ParentProcessId, Name | Format-Table -AutoSize
+          # Windows PowerShell 5.1 (what most users run) and PowerShell 7.
+          $out51 = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out51
+          if ($LASTEXITCODE -ne 0 -or $out51 -notmatch 'Scheiss Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under Windows PowerShell 5.1' }
+          $out7 = pwsh -NoProfile -File scripts/measure.ps1 -Samples 2 -IntervalSeconds 1 *>&1 | Out-String
+          $out7
+          if ($LASTEXITCODE -ne 0 -or $out7 -notmatch 'Scheiss Teams\s+True\s+[1-9]') { throw 'measure.ps1 failed under PowerShell 7' }
+          Stop-Process -Id $proc.Id -Force
+      - name: macOS smoke test (signature, launch, measure script)
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Scheiss Teams.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Signature|Format)"
+          lipo -archs "$APP/Contents/MacOS/lean-teams"
+          # Update check against the real GitHub release (menu bar "Update" entry).
+          "$APP/Contents/MacOS/lean-teams" --update-check | tee update.txt
+          grep -E "^build=$GITHUB_SHA latest=[0-9a-f]{40} update_available=(true|false)$" update.txt
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$APP/Contents/Info.plist" | grep -x msteams
+          # Red accent: the Dock icon's underline must turn red (see screenshot artifact).
+          CFG="$HOME/Library/Application Support/dev.leanteams.app"
+          mkdir -p "$CFG"
+          echo '{ "overlay": { "accent_color": "#ff2020" } }' > "$CFG/config.json"
+          "$APP/Contents/MacOS/lean-teams" > app.log 2>&1 &
+          for i in $(seq 1 30); do pgrep -f "Scheiss Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          sleep 20
+          mkdir -p screenshots && screencapture -x screenshots/macos.png || true
+          ps -axo pid,ppid,rss,command | grep -E "lean-teams|com\.apple\.WebKit" | grep -v grep || true
+          for p in $(pgrep -f "com.apple.WebKit"); do sudo launchctl procinfo "$p" 2>/dev/null | grep -i "responsible" || true; done
+          sudo SAMPLES=2 INTERVAL=1 bash scripts/measure-macos.sh | tee measure.txt
+          grep -E "^Scheiss Teams +yes" measure.txt
+          pkill -f "Scheiss Teams.app/Contents/MacOS/lean-teams" || true
+          # Embedded Teams apps (Assignments) need cross-site cookies.
+          cat app.log
+          grep -q "lean-teams: tracking prevention off" app.log
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Linux'
+        with:
+          name: screenshot-${{ runner.os }}
+          path: lean-teams/screenshots/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lean-teams-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            lean-teams/src-tauri/target/**/release/bundle/nsis/*.exe
+            lean-teams/src-tauri/target/**/release/bundle/msi/*.msi
+            lean-teams/src-tauri/target/**/release/bundle/dmg/*.dmg
+            lean-teams/src-tauri/target/**/release/bundle/deb/*.deb
+            lean-teams/src-tauri/target/**/release/bundle/appimage/*.AppImage
+
+  # Every push publishes the installers as a rolling pre-release with fixed
+  # asset names, so they can be downloaded without a GitHub login and with a
+  # stable URL (scripts/install-macos.sh relies on it).
+  release:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: lean-teams-release
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: lean-teams/RELEASE_NOTES.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect installers under stable names
+        run: |
+          mkdir dist
+          pick() { f=$(find artifacts -name "$1" | head -1); test -n "$f" || { echo "missing $1"; exit 1; }; cp "$f" "dist/$2"; }
+          pick '*.dmg'        LeanTeams-macOS-universal.dmg
+          pick '*-setup.exe'  LeanTeams-Windows-x64-setup.exe
+          pick '*.msi'        LeanTeams-Windows-x64.msi
+          pick '*.deb'        LeanTeams-Linux-amd64.deb
+          pick '*.AppImage'   LeanTeams-Linux-amd64.AppImage
+          ls -la dist
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          { cat lean-teams/RELEASE_NOTES.md; echo; echo "_Build ${GITHUB_SHA::7}_"; } > notes.md
+          # Read by the in-app update button (CDN download, no API rate limit).
+          echo "$GITHUB_SHA" > dist/build.txt
+          gh release delete lean-teams-latest --cleanup-tag --yes || true
+          gh release create lean-teams-latest dist/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Scheiss Teams (latest build)" \
+            --notes-file notes.md
+
+  # End-to-end check of the one-line macOS install against the release above.
+  verify-macos-install:
+    needs: release
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install via scripts/install-macos.sh and launch
+        run: |
+          bash lean-teams/scripts/install-macos.sh
+          for i in $(seq 1 30); do pgrep -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams" && break; sleep 1; done
+          pgrep -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams"
+          codesign --verify --deep --strict "/Applications/Scheiss Teams.app"
+          pkill -f "/Applications/Scheiss Teams.app/Contents/MacOS/lean-teams" || true

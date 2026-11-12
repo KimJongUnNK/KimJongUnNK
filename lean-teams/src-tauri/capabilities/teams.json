@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "teams-remote",
+  "description": "The only IPC surface exposed to the Teams web app: native notifications, opening chat links in the default browser, and copying the open assignment (text or screenshot) to the clipboard.",
+  "windows": ["main"],
+  "remote": {
+    "urls": [
+      "https://teams.microsoft.com/*",
+      "https://teams.cloud.microsoft/*",
+      "https://teams.live.com/*"
+    ]
+  },
+  "permissions": ["allow-notify", "allow-open-link", "allow-copy-text", "allow-copy-screenshot"]
+}

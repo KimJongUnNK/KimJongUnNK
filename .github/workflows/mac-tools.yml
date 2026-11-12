@@ -1,0 +1,29 @@
+name: Mac tools
+
+on:
+  push:
+    paths: ["mac-tools/**", "lean-teams/scripts/measure-macos.sh", ".github/workflows/mac-tools.yml"]
+  pull_request:
+    paths: ["mac-tools/**", "lean-teams/scripts/measure-macos.sh", ".github/workflows/mac-tools.yml"]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax
+        run: for f in mac-tools/*.sh lean-teams/scripts/measure-macos.sh; do bash -n "$f"; done
+      - name: Wondershare cleanup preview runs on a real Mac
+        run: bash mac-tools/wondershare-debloat.sh
+      - name: Install Dorion, launch it and measure it
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash mac-tools/install-dorion.sh
+          ls -d /Applications/*.app | grep -i dorion
+          for i in $(seq 1 30); do pgrep -f "/Applications/Dorion.app/Contents/MacOS/" && break; sleep 1; done
+          sleep 20
+          ps -axo pid,rss,command | grep -E "Dorion|com\.apple\.WebKit" | grep -v grep || true
+          sudo SAMPLES=2 INTERVAL=1 bash lean-teams/scripts/measure-macos.sh discord | tee measure.txt
+          grep -E "^Dorion +yes" measure.txt
