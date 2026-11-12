@@ -1,0 +1,352 @@
+{
+  "grid": [
+    -2912,
+    -2336,
+    8000,
+    5680
+  ],
+  "dem_min": 394.09625244140625,
+  "dem_max": 1062.798095703125,
+  "dem_max_at": [
+    2529,
+    -313
+  ],
+  "lake_cells": 11225366,
+  "bridges": 124,
+  "rail_cells": 24119,
+  "tunnels": 6,
+  "buildings": 6853,
+  "replaced": 35,
+  "landmarks": [
+    "kunsthaus",
+    "vorarlberg_museum",
+    "martinsturm",
+    "seebuehne",
+    "fischersteg",
+    "piers",
+    "mili_bridge",
+    "st_gallus_tower",
+    "unteres_tor_passage",
+    "herz_jesu",
+    "hauptpost",
+    "bahnhof",
+    "festspielhaus",
+    "tribune_entrance",
+    "landhaus",
+    "landesbibliothek",
+    "bg_gallus",
+    "rathaus",
+    "theater",
+    "kornmarkt",
+    "stadion",
+    "seebad",
+    "wirtshaus_am_see",
+    "casino",
+    "kreisverkehr_schillerstrasse",
+    "gebhardsberg_ruin",
+    "pfaenderbahn",
+    "sender",
+    "gipfelkreuz",
+    "wildpark",
+    "pfaenderdohle",
+    "harbour_detail"
+  ],
+  "landmarks_failed": [],
+  "street_lamps": 4654,
+  "street_signs": 2972,
+  "place_signs": 142,
+  "details": {
+    "benches": 233,
+    "bins": 147,
+    "bus_shelters": 116,
+    "fountains": 19,
+    "hedges": 278,
+    "walls": 155,
+    "fences": 126,
+    "crossings": 370,
+    "bollards": 83,
+    "signals": 73,
+    "pylons": 84,
+    "masts": 54,
+    "pitches": 84,
+    "playgrounds": 37,
+    "bike_racks": 29,
+    "stadiums": 0,
+    "pavement": 643100,
+    "paved_yards": 508008,
+    "car_parks": 227,
+    "road_half_steps": 652711
+  },
+  "trees": 543208,
+  "plants": 5165783,
+  "edits": 137585683,
+  "block_states": 404,
+  "spawn": [
+    12,
+    398,
+    -137
+  ],
+  "world_mb": 728.6,
+  "markers": {
+    "Immo-Stadion (Casino-Stadion)": [
+      -996,
+      399,
+      73
+    ],
+    "Seebad Bregenz (Strandbad)": [
+      -934,
+      398,
+      -96
+    ],
+    "Seebühne": [
+      -642,
+      401,
+      -76
+    ],
+    "Seetribüne": [
+      -637,
+      398,
+      -56
+    ],
+    "Festspielhaus Bregenz": [
+      -622,
+      399,
+      -2
+    ],
+    "Seetribüne Eingang (Platz)": [
+      -613,
+      399,
+      -32
+    ],
+    "Casino Bregenz": [
+      -588,
+      412,
+      93
+    ],
+    "Bahnhof Bregenz": [
+      -538,
+      399,
+      270
+    ],
+    "Bahnhof Steg": [
+      -521,
+      408,
+      141
+    ],
+    "Wirtshaus am See": [
+      -482,
+      399,
+      -35
+    ],
+    "Fischersteg": [
+      -239,
+      398,
+      -24
+    ],
+    "Landhaus": [
+      -104,
+      440,
+      412
+    ],
+    "Landesbibliothek": [
+      -97,
+      452,
+      1197
+    ],
+    "BG Gallus": [
+      -92,
+      425,
+      540
+    ],
+    "Vorarlberger Landesbibliothek (Kuppelsaal)": [
+      -91,
+      451,
+      1220
+    ],
+    "Molo-Spitze (Hafenleuchte)": [
+      -21,
+      398,
+      -430
+    ],
+    "vorarlberg museum": [
+      -15,
+      398,
+      16
+    ],
+    "Kapuzinerkloster": [
+      -5,
+      426,
+      550
+    ],
+    "Rathaus (Schild)": [
+      18,
+      400,
+      131
+    ],
+    "Rathaus Bregenz": [
+      25,
+      404,
+      124
+    ],
+    "Kunsthaus Bregenz (KUB)": [
+      50,
+      428,
+      -47
+    ],
+    "Landestheater": [
+      53,
+      399,
+      -10
+    ],
+    "Burgruine Hohenbregenz / Gebhardsberg": [
+      53,
+      599,
+      1618
+    ],
+    "Kunsthaus Bregenz": [
+      59,
+      398,
+      -38
+    ],
+    "St. Gallus": [
+      71,
+      472,
+      677
+    ],
+    "Wallfahrtskirche Gebhardsberg": [
+      77,
+      592,
+      1636
+    ],
+    "Pfarrkirche St. Gallus": [
+      105,
+      428,
+      669
+    ],
+    "Deuring-Schlössle": [
+      106,
+      425,
+      502
+    ],
+    "Hauptpost (Schild)": [
+      111,
+      399,
+      -83
+    ],
+    "Hauptpost": [
+      120,
+      429,
+      -110
+    ],
+    "Nepomukkapelle (Schild)": [
+      120,
+      399,
+      -49
+    ],
+    "Nepomukkapelle": [
+      125,
+      399,
+      -38
+    ],
+    "Unteres Tor (Stadttor)": [
+      158,
+      425,
+      419
+    ],
+    "Martinsturm": [
+      204,
+      424,
+      382
+    ],
+    "Sutterlüty / Haus am Hafen": [
+      210,
+      417,
+      -205
+    ],
+    "Kreisverkehr Schillerstrasse": [
+      216,
+      400,
+      -154
+    ],
+    "Altes Rathaus": [
+      236,
+      430,
+      507
+    ],
+    "Herz-Jesu-Kirche": [
+      264,
+      479,
+      261
+    ],
+    "Herz-Jesu-Kirche (Schild)": [
+      296,
+      414,
+      271
+    ],
+    "Mili (Militärbad)": [
+      368,
+      399,
+      -622
+    ],
+    "Mili": [
+      380,
+      398,
+      -610
+    ],
+    "Bilgeri-Kaserne": [
+      425,
+      401,
+      -472
+    ],
+    "Pfänderbahn Talstation": [
+      470,
+      414,
+      -47
+    ],
+    "Fluh (Projekt-Koordinate)": [
+      1143,
+      721,
+      1652
+    ],
+    "Pfänderbahn Stütze 1": [
+      1826,
+      853,
+      -119
+    ],
+    "St. Wendelin (Fluh)": [
+      2182,
+      743,
+      1180
+    ],
+    "Pfänderbahn Stütze 2": [
+      2385,
+      1006,
+      -152
+    ],
+    "Alpenwildpark Pfänder": [
+      2403,
+      1012,
+      -235
+    ],
+    "Pfänderbahn Bergstation": [
+      2462,
+      1023,
+      -146
+    ],
+    "Sender Pfänder": [
+      2504,
+      1051,
+      -385
+    ],
+    "Pfänder Gipfelkreuz": [
+      2527,
+      1064,
+      -317
+    ],
+    "Pfänderdohle (Berggasthaus)": [
+      2665,
+      947,
+      -105
+    ]
+  }
+}
