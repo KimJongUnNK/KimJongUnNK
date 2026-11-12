@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from bregenz import anvil, buildings, config, details, geo, landmarks, level, mapitems, render, roads, signs, terrain, vegetation
+from bregenz import (anvil, buildings, config, details, geo, landmarks, level, mapitems, render, roads, signs, terrain,
+                     useredits, vegetation)
 from bregenz.world import BIOMES, World, build_chunk_blocks, chunk_biome_grid
 
 ROOT = Path(__file__).resolve().parent
@@ -66,7 +67,14 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--no-zip", action="store_true")
     ap.add_argument("--previews", default=str(ROOT / "previews"))
+    ap.add_argument("--keep-edits", default=None,
+                    help="folder written by 'python -m bregenz.useredits extract': the player's changes are kept")
+    ap.add_argument("--no-baseline", action="store_true", help="do not keep a copy of the result in baseline/")
     args = ap.parse_args(argv)
+    keep = Path(args.keep_edits) if args.keep_edits else None
+    if keep is not None and not (keep / "blocks.npz").exists():
+        log(f"--keep-edits: {keep} has no extracted edits")
+        return 2
 
     t0 = time.time()
     bbox = tuple(args.bbox) if args.bbox else config.WORLD_BBOX
@@ -82,6 +90,8 @@ def main(argv=None) -> int:
     stats.update(signs.build(world, log))
     stats.update(details.build(world, log))
     stats.update(vegetation.build(world, log))
+    if keep is not None:
+        stats["user_blocks"] = useredits.apply_blocks(world, keep, log)
     log(f"edits: {world.edits.count:,} block placements, sorting by chunk")
     edits = world.edits.finalize(grid)
     stats["edits"] = int(edits.xs.size)
@@ -163,6 +173,16 @@ def main(argv=None) -> int:
         "Im Inventar: Karten + Buch 'Bregenz Teleporter' (Eintrag anklicken = teleportieren)\n\n"
         + "\n".join(f"{name:42s} /function bregenz:tp/{sl:38s} /tp @s {x} {y} {z}" for name, sl, (x, y, z) in targets)
         + "\n", encoding="utf-8")
+
+    if keep is not None:
+        useredits.apply_files(out, keep, log)
+    if not args.bbox and not args.no_baseline:
+        # the delivered world is the reference the player's next changes are compared with
+        base = ROOT / "baseline" / time.strftime("%Y-%m-%d_%H%M")
+        if base.exists():
+            shutil.rmtree(base)
+        shutil.copytree(out, base, copy_function=os.link)
+        log(f"baseline kept in {base}")
 
     if not args.no_zip:
         zpath = out.parent / f"{out.name}.zip"

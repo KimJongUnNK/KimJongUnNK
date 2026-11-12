@@ -48,6 +48,20 @@ python tools/plan.py                   # Lageplan mit Höhenlinien und Straßenn
 python tools/check_bridges.py          # prüft jede Brücke der fertigen Welt auf Durchfahrtshöhe
 ```
 
+## Eigene Änderungen behalten
+
+Wenn du in der Welt baust und danach eine neue Version generiert wird, bleibt dein Gebautes erhalten:
+
+```bash
+python -m bregenz.useredits extract /pfad/zu/deiner/Welt.zip   # vergleicht mit baseline/<letzte Version>
+python generate.py --keep-edits data/user_edits                # neue Welt + alles, was du geändert hast
+```
+
+Übernommen werden jeder gesetzte oder abgebaute Block, Schilder mit neuem Text, Truhen-Inhalte, alles, was du außerhalb
+der Karte gebaut hast, sowie dein Spieler (Position, Inventar), Statistiken, Fortschritte, Tiere/Rüstungsständer, eigene
+Karten und eigene Datapacks. Jeder Volllauf legt die ausgelieferte Welt als Referenz in `baseline/` ab; bei der nächsten
+Runde werden nur die neuen Änderungen dazugenommen, frühere bleiben gespeichert.
+
 ## Aufbau
 
 ```
@@ -61,6 +75,7 @@ bregenz/
   landmarks.py   Handgebaute Wahrzeichen + Schilder
   civic.py       Nach Fotos gebaut: Festspielhaus, Landhaus, Landesbibliothek, BG Gallus, Bahnhof, Rathaus, Kornmarkt, Fischersteg
   signs.py       Straßennamen- und Ortsschilder
+  useredits.py   Änderungen aus der gespielten Welt auslesen und in neue Versionen übernehmen
   details.py     Stadtmobiliar & Kleinkram aus OSM (Bänke, Hecken, Zebrastreifen, Masten, Sportplätze ...)
   harbour.py     Hafen: Kursschiffe, Marina-Boote, Hafenleuchten, Promenade
   vegetation.py  Bäume (vektorisiert), Bodendecker, Blumen
