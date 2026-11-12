@@ -1,4 +1,4 @@
-From 8ee2a3326d03e6f24d89fb78ea09fe04f90a1479 Mon Sep 17 00:00:00 2001
+From 1a3b0e45ed93372283c2535810eec522ded8e2e6 Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 01:22:31 +0000
 Subject: [PATCH] German spelling: compounds, de-AT, and the system language as
@@ -28,11 +28,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
 ---
  crates/engine/Cargo.toml               |   2 +
- crates/engine/src/spell.rs             | 634 +++++++++++++++++++++----
+ crates/engine/src/spell.rs             | 640 +++++++++++++++++++++----
  crates/ui-egui/src/canvas/squiggles.rs |   3 +-
  crates/ui-egui/src/dialogs/language.rs |   6 +-
  crates/ui-egui/src/status.rs           |   7 +-
- 5 files changed, 559 insertions(+), 93 deletions(-)
+ 5 files changed, 559 insertions(+), 99 deletions(-)
 
 diff --git a/crates/engine/Cargo.toml b/crates/engine/Cargo.toml
 index cb1f4c29..1e05a423 100644
@@ -48,7 +48,7 @@ index cb1f4c29..1e05a423 100644
  chrono = { workspace = true }
  
 diff --git a/crates/engine/src/spell.rs b/crates/engine/src/spell.rs
-index 2dda5c6f..65922235 100644
+index 8bc88e64..cc88f8e3 100644
 --- a/crates/engine/src/spell.rs
 +++ b/crates/engine/src/spell.rs
 @@ -3,8 +3,15 @@
@@ -194,7 +194,7 @@ index 2dda5c6f..65922235 100644
                  ["COMPOUNDMIDDLE", f, ..] => d.compound_middle = one_flag(Some(f), mode),
                  ["COMPOUNDEND", f, ..] | ["COMPOUNDLAST", f, ..] => d.compound_end = one_flag(Some(f), mode),
                  ["COMPOUNDMIN", n, ..] => d.compound_min = n.parse::<usize>().unwrap_or(3).max(1),
-@@ -219,6 +335,16 @@ impl Dictionary {
+@@ -222,6 +338,16 @@ impl Dictionary {
              };
              d.words.entry(word.to_string()).or_default().push(flags);
          }
@@ -211,7 +211,7 @@ index 2dda5c6f..65922235 100644
          d
      }
  
-@@ -231,49 +357,83 @@ impl Dictionary {
+@@ -234,49 +360,83 @@ impl Dictionary {
          f.is_some_and(|f| flags.contains(&f))
      }
  
@@ -327,7 +327,7 @@ index 2dda5c6f..65922235 100644
                          return true;
                      }
                  }
-@@ -282,77 +442,86 @@ impl Dictionary {
+@@ -285,83 +445,86 @@ impl Dictionary {
          false
      }
  
@@ -393,7 +393,12 @@ index 2dda5c6f..65922235 100644
  
      /// `w` made of dictionary parts allowed in compounds (`COMPOUNDFLAG`, or the begin, middle and
 -    /// end flags), each at least `COMPOUNDMIN` characters long.
--    fn compounded(&self, w: &[char], index: usize) -> bool {
+-    fn compounded(&self, w: &[char], index: usize, failed: &mut HashSet<(usize, usize)>) -> bool {
+-        // `w` is always a tail of the checked word, so its length names it: a (tail, part index)
+-        // that failed once fails again however the earlier parts were split.
+-        if failed.contains(&(w.len(), index)) {
+-            return false;
+-        }
 +    /// end flags), each at least `COMPOUNDMIN` characters long. Each tail is worked out once.
 +    fn compounded(&self, w: &[char]) -> bool {
          if self.compound.is_none() && self.compound_end.is_none() {
@@ -414,7 +419,7 @@ index 2dda5c6f..65922235 100644
 -            if [self.compound, self.compound_end].into_iter().flatten().any(|f| self.compound_part(rest, f, true)) {
 -                return true;
 -            }
--            if self.compounded(rest, index + 1) {
+-            if self.compounded(rest, index + 1, failed) {
 -                return true;
 -            }
 +        let mut tails: HashMap<usize, bool> = HashMap::new();
@@ -426,6 +431,7 @@ index 2dda5c6f..65922235 100644
 +        if let Some(&known) = tails.get(&from) {
 +            return known;
          }
+-        failed.insert((w.len(), index));
 -        false
 +        let max_parts = if self.compound_max > 0 { self.compound_max } else { DEFAULT_COMPOUND_PARTS };
 +        let min = self.compound_min.max(1);
@@ -460,12 +466,12 @@ index 2dda5c6f..65922235 100644
 -                return true;
 -            }
 -        }
--        self.compounded(&w, 0)
+-        self.compounded(&w, 0, &mut HashSet::new())
 +        self.analyze(&w, &mut |a| self.affixes_ok(a, false)) || self.compounded(&w)
      }
  
      /// Is `word` spelt correctly? Capitalised and upper-case forms of a lower-case word pass.
-@@ -385,6 +554,10 @@ impl Dictionary {
+@@ -394,6 +557,10 @@ impl Dictionary {
              if !keep(&cap) && self.check_exact(&cap) {
                  return true;
              }
@@ -476,7 +482,7 @@ index 2dda5c6f..65922235 100644
          }
          // A trailing full stop on an abbreviation (`etc.`) is part of the word in some dictionaries.
          false
-@@ -412,10 +585,17 @@ impl Dictionary {
+@@ -421,10 +588,17 @@ impl Dictionary {
              }
              // Checked in capitals, so a KEEPCASE entry ("NASA") is offered for an all-caps word.
              let s = if upper { s.to_uppercase() } else { s };
@@ -495,7 +501,7 @@ index 2dda5c6f..65922235 100644
          for (a, b) in &self.rep {
              let mut from = 0;
              while let Some(i) = lower.get(from..).and_then(|t| t.find(a.as_str())) {
-@@ -424,7 +604,12 @@ impl Dictionary {
+@@ -433,7 +607,12 @@ impl Dictionary {
                  from = at + a.len().max(1);
              }
          }
@@ -509,7 +515,7 @@ index 2dda5c6f..65922235 100644
          let s = |v: &[char]| v.iter().collect::<String>();
          for i in 0..w.len().saturating_sub(1) {
              let mut v = w.clone();
-@@ -506,6 +691,13 @@ pub fn search_dirs() -> Vec<PathBuf> {
+@@ -515,6 +694,13 @@ pub fn search_dirs() -> Vec<PathBuf> {
          out.push("/Library/Spelling".into());
      } else if cfg!(target_os = "windows") {
          out.extend(std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("DeckCraft").join("Dictionaries")));
@@ -523,7 +529,7 @@ index 2dda5c6f..65922235 100644
      } else {
          let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".local/share")));
          out.extend(data.iter().map(|d| d.join("deckcraft/dictionaries")));
-@@ -513,10 +705,57 @@ pub fn search_dirs() -> Vec<PathBuf> {
+@@ -522,10 +708,57 @@ pub fn search_dirs() -> Vec<PathBuf> {
          for d in ["/usr/share/hunspell", "/usr/share/myspell", "/usr/share/myspell/dicts", "/usr/local/share/hunspell", "/app/share/hunspell"] {
              out.push(d.into());
          }
@@ -581,7 +587,7 @@ index 2dda5c6f..65922235 100644
  /// `en-US` → `en_US`; the language alone (`en`) as a fallback.
  fn names(lang: &str) -> (String, String) {
      let full = lang.replace('-', "_");
-@@ -545,6 +784,24 @@ pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
+@@ -554,6 +787,24 @@ pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
              return Some(p);
          }
      }
@@ -606,7 +612,7 @@ index 2dda5c6f..65922235 100644
      for d in dirs {
          if let Some(p) = pair(d, &base) {
              return Some(p);
-@@ -742,7 +999,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
+@@ -789,7 +1040,9 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
          let mut k = a;
          for part in text.split('-') {
              let n = part.chars().count();
@@ -616,7 +622,7 @@ index 2dda5c6f..65922235 100644
                  && let Some(c) = chars.get(k)
              {
                  if p.runs.get(c.1).is_some_and(|r| r.props.no_proof == Some(true)) {
-@@ -978,4 +1237,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
+@@ -1078,4 +1331,203 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
          assert_eq!(stem("fr-FR"), None);
          let _ = std::fs::remove_dir_all(&dir);
      }
