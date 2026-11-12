@@ -1,4 +1,4 @@
-From ee63b1089efc9afb150d6aa4b97b1ab9f70f13eb Mon Sep 17 00:00:00 2001
+From 2b69ca40f92f7eca045a91c5d924f9c247aac3b5 Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Mon, 2 Nov 2026 19:00:40 +0000
 Subject: [PATCH 1/4] Import Wondershare Filmora projects (.wfp)
@@ -143,10 +143,10 @@ index fb828bc1..579f01ce 100644
  /// The interchange format of a file, if it is one (by content, with the extension as a hint).
  pub fn detect(path: &str, bytes: &[u8]) -> Option<Format> {
 diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
-index 56d05b70..3a29bdf3 100644
+index f74787dc..ec03a274 100644
 --- a/crates/engine/src/lib.rs
 +++ b/crates/engine/src/lib.rs
-@@ -1362,6 +1362,8 @@ mod export_tests;
+@@ -1363,6 +1363,8 @@ mod export_tests;
  #[cfg(test)]
  mod file_tests;
  #[cfg(test)]
@@ -156,7 +156,7 @@ index 56d05b70..3a29bdf3 100644
  #[cfg(test)]
  mod history_tests;
 diff --git a/crates/engine/src/media_browser.rs b/crates/engine/src/media_browser.rs
-index 6fdda50a..280ee6f7 100644
+index 93d86ae7..9928c322 100644
 --- a/crates/engine/src/media_browser.rs
 +++ b/crates/engine/src/media_browser.rs
 @@ -78,7 +78,7 @@ pub const DEFAULT_COLUMNS: [&str; 5] = ["Name", "Frame Rate", "Media Duration",
@@ -1179,20 +1179,20 @@ index 8daeca64..a9a7b4d2 100644
      Ok((text.into_bytes(), report))
  }
 diff --git a/crates/ui-egui/src/app/files.rs b/crates/ui-egui/src/app/files.rs
-index 137f5d4f..7c569623 100644
+index 0b3e856b..ff24d256 100644
 --- a/crates/ui-egui/src/app/files.rs
 +++ b/crates/ui-egui/src/app/files.rs
 @@ -15,7 +15,7 @@ impl FilmcraftApp {
                      .iter()
                      .chain(filmcraft_media::AUDIO_EXTENSIONS)
                      .chain(filmcraft_media::STILL_EXTENSIONS)
--                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf"])
-+                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "wfp"])
+-                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "prfpset"])
++                    .chain(&["srt", "vtt", "scc", "edl", "xml", "fcpxml", "otio", "aaf", "omf", "prfpset", "wfp"])
                      .copied()
                      .collect();
                  let bin = params.get("bin").cloned();
 diff --git a/docs/file-format-parity.md b/docs/file-format-parity.md
-index 029729c4..357862e6 100644
+index e732af0e..129b8f96 100644
 --- a/docs/file-format-parity.md
 +++ b/docs/file-format-parity.md
 @@ -21,6 +21,7 @@ only). "Tested" names the evidence.
@@ -1207,7 +1207,7 @@ index 029729c4..357862e6 100644
 2.43.0
 
 
-From cecbbbe52e1d89492b60b58c4c882c2a7ab436ba Mon Sep 17 00:00:00 2001
+From 529e91f9ad08240ec18351b79b18a94ee76caddb Mon Sep 17 00:00:00 2001
 From: Emil Boenke <boenkeemil@gmail.com>
 Date: Tue, 3 Nov 2026 00:29:12 +0000
 Subject: [PATCH 2/4] Open Filmora projects with File > Open and by dropping
@@ -1227,7 +1227,7 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
  4 files changed, 53 insertions(+), 2 deletions(-)
 
 diff --git a/apps/filmcraft/src/main.rs b/apps/filmcraft/src/main.rs
-index 34eb7e24..0914da21 100644
+index ba198956..d9ae511d 100644
 --- a/apps/filmcraft/src/main.rs
 +++ b/apps/filmcraft/src/main.rs
 @@ -353,7 +353,8 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
@@ -1241,10 +1241,10 @@ index 34eb7e24..0914da21 100644
                  // filter hides every saved project; "All files" keeps them reachable.
                  .add_filter(filmcraft_ui_egui::i18n::t("All files"), &file_filters::all_files())
 diff --git a/crates/engine/src/commands.rs b/crates/engine/src/commands.rs
-index c0f17b8b..c1d272d4 100644
+index 2ee1f331..ca23efbc 100644
 --- a/crates/engine/src/commands.rs
 +++ b/crates/engine/src/commands.rs
-@@ -5219,6 +5219,11 @@ pub(crate) fn install_project(s: &mut Session, proj: filmcraft_project::Project,
+@@ -5379,6 +5379,11 @@ pub(crate) fn install_project(s: &mut Session, proj: filmcraft_project::Project,
  
  fn open_project(s: &mut Session, path: &str) -> Result<Value> {
      let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -1256,7 +1256,7 @@ index c0f17b8b..c1d272d4 100644
      let loaded = filmcraft_format::decode(&bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
      let (from, migrated) = (loaded.schema_version, loaded.migrated());
      crate::masks::discard_jobs(s);
-@@ -5239,6 +5244,25 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
+@@ -5399,6 +5404,25 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
      Ok(json!({"path": path, "schemaVersion": from, "migrated": migrated, "missingMedia": missing}))
  }
  
@@ -1316,10 +1316,10 @@ index ec2cb67b..8e739089 100644
 +    let _ = std::fs::remove_dir_all(&d);
 +}
 diff --git a/crates/ui-egui/src/app/input.rs b/crates/ui-egui/src/app/input.rs
-index b85884b5..f769c687 100644
+index b911e4be..1b0d147d 100644
 --- a/crates/ui-egui/src/app/input.rs
 +++ b/crates/ui-egui/src/app/input.rs
-@@ -118,7 +118,8 @@ impl FilmcraftApp {
+@@ -139,7 +139,8 @@ impl FilmcraftApp {
  
  /// Whether a dropped file is a FilmCraft project (opened, not imported).
  fn is_project_file(path: &str) -> bool {
@@ -1333,7 +1333,7 @@ index b85884b5..f769c687 100644
 2.43.0
 
 
-From 6dccc5c3e72a1042db53195ec3f1e65c1dc7897d Mon Sep 17 00:00:00 2001
+From c985653d91570024fc0d24e61c2789ae0605e0a3 Mon Sep 17 00:00:00 2001
 From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 15:42:43 +0000
 Subject: [PATCH 3/4] Filmora import: carry colour, Pan & Zoom, shadows, keys,
@@ -1933,7 +1933,7 @@ index 309d3726..2a5bb32b 100644
 2.43.0
 
 
-From 7f9246db46e5dc0a244055fab43d72ae9f00762d Mon Sep 17 00:00:00 2001
+From 7b071d7df42805a2812a2e3e2d5abc4c68d8e46f Mon Sep 17 00:00:00 2001
 From: KimJongUnNK <80416019+KimJongUnNK@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 16:07:06 +0000
 Subject: [PATCH 4/4] Filmora Edition look: the Mint theme and the Filmora
@@ -1974,7 +1974,7 @@ Claude-Session: https://claude.ai/code/session_01GBuDRRQePZfJwfmCbrvseN
  create mode 100644 crates/ui-egui/tests/it/filmora_look_ui.rs
 
 diff --git a/apps/filmcraft/src/main.rs b/apps/filmcraft/src/main.rs
-index 0914da21..921d15e9 100644
+index d9ae511d..fd81e69c 100644
 --- a/apps/filmcraft/src/main.rs
 +++ b/apps/filmcraft/src/main.rs
 @@ -229,6 +229,9 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
@@ -2014,10 +2014,10 @@ index 0914da21..921d15e9 100644
          app.graphics_notice = notice;
          if recover == Some(false) {
 diff --git a/crates/engine/src/settings/schema.rs b/crates/engine/src/settings/schema.rs
-index 09f0fc53..06cf1cad 100644
+index bfc714de..16c65646 100644
 --- a/crates/engine/src/settings/schema.rs
 +++ b/crates/engine/src/settings/schema.rs
-@@ -117,7 +117,7 @@ const BIN_OPEN: &[(&str, &str)] = &[("openInPlace", "Open in place"), ("openNewT
+@@ -126,7 +126,7 @@ const BIN_OPEN: &[(&str, &str)] = &[("openInPlace", "Open in place"), ("openNewT
  
  const PROJECT_OPEN: &[(&str, &str)] = &[("openNewTab", "Open new tab"), ("openNewWindow", "Open in new window")];
  
@@ -2026,7 +2026,7 @@ index 09f0fc53..06cf1cad 100644
  
  pub const APPEARANCE_MODES: &[(&str, &str)] = &[("auto", "Sync with system"), ("dark", "Dark"), ("light", "Light")];
  
-@@ -133,7 +133,7 @@ pub const UI_SCALES: &[(&str, &str)] = &[
+@@ -142,7 +142,7 @@ pub const UI_SCALES: &[(&str, &str)] = &[
      ("300", "300%"),
  ];
  
@@ -2036,10 +2036,10 @@ index 09f0fc53..06cf1cad 100644
  pub const LIGHT_THEMES: &[(&str, &str)] = &[("light", "Light")];
  
 diff --git a/crates/ui-egui/src/dock.rs b/crates/ui-egui/src/dock.rs
-index c7b473c7..19339154 100644
+index b29726d6..1b004006 100644
 --- a/crates/ui-egui/src/dock.rs
 +++ b/crates/ui-egui/src/dock.rs
-@@ -145,8 +145,8 @@ fn vsplit(size: SplitSize, a: Node<PanelKind>, b: Node<PanelKind>) -> Node<Panel
+@@ -151,8 +151,8 @@ fn vsplit(size: SplitSize, a: Node<PanelKind>, b: Node<PanelKind>) -> Node<Panel
      Node::Split { axis: SplitAxis::Vertical, size, first: Box::new(a), second: Box::new(b) }
  }
  
@@ -2050,7 +2050,7 @@ index c7b473c7..19339154 100644
  
  /// The user's workspaces file, beside `preferences.json` in the data directory.
  pub const WORKSPACES_FILE: &str = "workspaces.json";
-@@ -493,6 +493,18 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
+@@ -499,6 +499,18 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
              ),
              tabs(&[Program], 0),
          ),
@@ -2070,17 +2070,17 @@ index c7b473c7..19339154 100644
              Ratio(0.5),
              hsplit(
 diff --git a/crates/ui-egui/src/i18n/de.tsv b/crates/ui-egui/src/i18n/de.tsv
-index a495cf9c..300995aa 100644
+index 5e90d832..02c18b1b 100644
 --- a/crates/ui-egui/src/i18n/de.tsv
 +++ b/crates/ui-egui/src/i18n/de.tsv
-@@ -3683,3 +3683,5 @@
- 	Previous	Zurück
- 	Next	Weiter
- 	Enter a valid HH:MM:SS:FF timecode	Gültigen Timecode als HH:MM:SS:FF eingeben
+@@ -3699,3 +3699,5 @@
+ 	Toggle Color Grading Section	Farbgrading-Abschnitt umschalten
+ 	Color Grading Section	Farbgrading-Abschnitt
+ 	Read Video Scopes	Videoskope auslesen
 +	Filmora Style	Filmora-Stil
 +	Mint	Mint
 diff --git a/crates/ui-egui/src/menus.rs b/crates/ui-egui/src/menus.rs
-index 9e10031e..6e21493d 100644
+index e86b3b83..ca5147a1 100644
 --- a/crates/ui-egui/src/menus.rs
 +++ b/crates/ui-egui/src/menus.rs
 @@ -116,6 +116,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
@@ -2300,10 +2300,10 @@ index 00000000..f922f986
 +    }
 +}
 diff --git a/crates/ui-egui/tests/it/main.rs b/crates/ui-egui/tests/it/main.rs
-index cc580e7c..672dcd78 100644
+index 5fe8638f..2473407a 100644
 --- a/crates/ui-egui/tests/it/main.rs
 +++ b/crates/ui-egui/tests/it/main.rs
-@@ -23,6 +23,7 @@ mod escape_drag_ui;
+@@ -24,6 +24,7 @@ mod escape_drag_ui;
  mod essential_sound_ui;
  mod export_menu_ui;
  mod export_ui;
